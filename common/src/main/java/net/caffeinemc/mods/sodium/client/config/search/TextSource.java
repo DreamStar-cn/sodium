@@ -15,8 +15,8 @@ public abstract class TextSource {
         return this.text;
     }
 
-    public int getLength() {
-        return this.getText().length();
+    void invalidateText() {
+        this.text = null;
     }
 
     public float getScore() {

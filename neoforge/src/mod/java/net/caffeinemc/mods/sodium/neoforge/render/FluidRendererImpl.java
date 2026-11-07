@@ -11,6 +11,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline.FluidRend
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.material.DefaultMaterials;
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.material.Material;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.TranslucentGeometryCollector;
+import net.caffeinemc.mods.sodium.client.render.helper.ColorHelper;
 import net.caffeinemc.mods.sodium.client.services.FluidRendererFactory;
 import net.caffeinemc.mods.sodium.client.world.LevelSlice;
 import net.minecraft.client.Minecraft;
@@ -35,13 +36,13 @@ public class FluidRendererImpl extends FluidRenderer {
 
     public FluidRendererImpl(ColorProviderRegistry colorProviderRegistry, LightPipelineProvider lighters) {
         this.colorProviderRegistry = colorProviderRegistry;
-        defaultRenderer = new DefaultFluidRenderer(lighters);
+        this.defaultRenderer = new DefaultFluidRenderer(lighters);
         this.fluidStates = Minecraft.getInstance().getModelManager().getFluidStateModelSet();
-        this.fluidRenderer = new net.minecraft.client.renderer.block.FluidRenderer(fluidStates);
+        this.fluidRenderer = new net.minecraft.client.renderer.block.FluidRenderer(this.fluidStates);
     }
 
     public void render(LevelSlice level, BlockState blockState, FluidState fluidState, BlockPos blockPos, BlockPos offset, TranslucentGeometryCollector collector, ChunkBuildBuffers buffers) {
-        var material = DefaultMaterials.forChunkLayer(fluidStates.get(fluidState).layer());
+        var material = DefaultMaterials.forChunkLayer(this.fluidStates.get(fluidState).layer());
         var meshBuilder = buffers.get(material);
 
         IClientFluidTypeExtensions handler = IClientFluidTypeExtensions.of(fluidState);
@@ -68,11 +69,11 @@ public class FluidRendererImpl extends FluidRenderer {
         // parameters are bundled into a DefaultRenderContext which is stored in a ThreadLocal.
 
         DefaultRenderContext defaultContext = CURRENT_DEFAULT_CONTEXT.get();
-        var model = fluidStates.get(fluidState);
+        var model = this.fluidStates.get(fluidState);
         defaultContext.setUp(this.colorProviderRegistry, this.defaultRenderer, level, blockState, fluidState, blockPos, offset, collector, meshBuilder, material, handler, model);
 
         try {
-            if (model.customRenderer() == null || !model.customRenderer().renderFluid(fluidRenderer, fluidState, level, blockPos, i -> meshBuilder.asFallbackVertexConsumer(DefaultMaterials.forChunkLayer(i), collector), blockState)) {
+            if (model.customRenderer() == null || !model.customRenderer().renderFluid(this.fluidRenderer, fluidState, level, blockPos, i -> meshBuilder.asFallbackVertexConsumer(DefaultMaterials.forChunkLayer(i), collector), blockState)) {
                 defaultContext.render();
             }
         } finally {
@@ -130,12 +131,12 @@ public class FluidRendererImpl extends FluidRenderer {
                 return override;
             }
 
-            return ForgeColorProviders.adapt(model.fluidTintSource());
+            return ForgeColorProviders.adapt(this.model.fluidTintSource());
         }
 
         public void render() {
             this.renderer.render(this.level, this.blockState, this.fluidState, this.blockPos, this.offset, this.collector, this.meshBuilder, this.material,
-                    getColorProvider(fluidState.getType()), model);
+                    this.getColorProvider(this.fluidState.getType()), this.model);
         }
     }
 
@@ -155,7 +156,16 @@ public class FluidRendererImpl extends FluidRenderer {
                             .getFluidStateModelSet()
                             .get(state)
                             .fluidTintSource();
-                    return tintSource != null ? tintSource.colorInWorld(state, state.createLegacyBlock(), slice, pos) : -1;
+
+                    // if the tint source gives a zero alpha color, the intent is probably for full opacity.
+                    // if there is some non-zero value given, they probably want that value and not 255.
+                    // TODO: does this regress https://github.com/CaffeineMC/sodium/issues/3576 ? why or why not?
+                    if (tintSource == null) {
+                        return -1;
+                    } else {
+                        var color = tintSource.colorInWorld(state, state.createLegacyBlock(), slice, pos);
+                        return ColorHelper.makeOpaqueIfTransparent(color);
+                    }
                 }
             };
         }
@@ -170,7 +180,13 @@ public class FluidRendererImpl extends FluidRenderer {
                             .getFluidStateModelSet()
                             .get(state.getFluidState().isEmpty() ? Fluids.WATER.defaultFluidState() : state.getFluidState())
                             .fluidTintSource();
-                    return tintSource != null ? tintSource.colorInWorld(state, slice, pos) : -1;
+
+                    if (tintSource == null) {
+                        return -1;
+                    } else {
+                        var color = tintSource.colorInWorld(state, slice, pos);
+                        return ColorHelper.makeOpaqueIfTransparent(color);
+                    }
                 }
             };
         }

@@ -3,13 +3,8 @@ package net.caffeinemc.mods.sodium.client.util.sorting;
 import com.mojang.blaze3d.vertex.CompactVectorArray;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import net.caffeinemc.mods.sodium.client.util.MathUtil;
-import org.apache.commons.lang3.Validate;
-import org.jspecify.annotations.NonNull;
 import org.joml.Vector3f;
-import net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics;
-import org.lwjgl.system.MemoryUtil;
-
-import java.nio.ByteBuffer;
+import org.jspecify.annotations.NonNull;
 
 public class VertexSorters {
     public static VertexSortingExtended distance(float x, float y, float z) {
@@ -96,48 +91,5 @@ public class VertexSorters {
         public float applyMetric(float x, float y, float z) {
             return this.function.apply(this.scratch.set(x, y, z));
         }
-    }
-
-    public static int[] sort(ByteBuffer buffer, int vertexCount, int vertexStride, VertexSortingExtended sorting) {
-        Validate.isTrue(buffer.remaining() >= vertexStride * vertexCount,
-                "Vertex buffer is not large enough to contain all vertices");
-
-        long pVertex0 = MemoryUtil.memAddress(buffer);
-        long pVertex2 = MemoryUtil.memAddress(buffer, vertexStride * 2);
-
-        int primitiveCount = vertexCount / 4;
-        int primitiveStride = vertexStride * 4;
-
-        final int[] keys = new int[primitiveCount];
-        final int[] perm = new int[primitiveCount];
-
-        for (int primitiveId = 0; primitiveId < primitiveCount; primitiveId++) {
-            // Position of vertex[0]
-            float v0x = MemoryIntrinsics.getFloat(pVertex0 + 0L);
-            float v0y = MemoryIntrinsics.getFloat(pVertex0 + 4L);
-            float v0z = MemoryIntrinsics.getFloat(pVertex0 + 8L);
-
-            // Position of vertex[2]
-            float v2x = MemoryIntrinsics.getFloat(pVertex2 + 0L);
-            float v2y = MemoryIntrinsics.getFloat(pVertex2 + 4L);
-            float v2z = MemoryIntrinsics.getFloat(pVertex2 + 8L);
-
-            // The centroid of the quad is calculated using the mid-point of the diagonal edge. This will not work
-            // for degenerate quads, but those are not sortable anyway.
-            float cx = (v0x + v2x) * 0.5F;
-            float cy = (v0y + v2y) * 0.5F;
-            float cz = (v0z + v2z) * 0.5F;
-
-            // The sign bit of the metric is negated as we need back-to-front (descending) ordering.
-            keys[primitiveId] = MathUtil.floatToComparableInt(-sorting.applyMetric(cx, cy, cz));
-            perm[primitiveId] = primitiveId;
-
-            pVertex0 += primitiveStride;
-            pVertex2 += primitiveStride;
-        }
-
-        RadixSort.sortIndirect(perm, keys, true);
-
-        return perm;
     }
 }

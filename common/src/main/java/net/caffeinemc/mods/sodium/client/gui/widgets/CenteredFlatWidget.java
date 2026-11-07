@@ -1,5 +1,6 @@
 package net.caffeinemc.mods.sodium.client.gui.widgets;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.caffeinemc.mods.sodium.client.gui.ButtonTheme;
 import net.caffeinemc.mods.sodium.client.gui.ColorTheme;
 import net.caffeinemc.mods.sodium.client.gui.Colors;
@@ -45,7 +46,7 @@ public abstract class CenteredFlatWidget extends AbstractWidget {
         this.hovered = this.isMouseOver(mouseX, mouseY);
 
         int backgroundColor = this.hovered ? this.theme.bgHighlight : (this.selected ? this.theme.bgDefault : this.theme.bgInactive);
-        int textColor = this.selected || !this.isSelectable ? this.theme.themeLighter : (this.hovered ? this.theme.theme : theme.themeDarker);
+        int textColor = this.selected || !this.isSelectable ? this.theme.themeLighter : (this.hovered ? this.theme.theme : this.theme.themeDarker);
 
         int x1 = this.getX();
         int y1 = this.getY();
@@ -57,7 +58,7 @@ public abstract class CenteredFlatWidget extends AbstractWidget {
         }
 
         if (this.selected) {
-            this.drawRect(graphics, x2 - 3, y1, x2, y2, this.theme.themeLighter);
+            this.drawRect(graphics, x2 - Layout.PAGE_ENTRY_SELECTION_BAR_WIDTH, y1, x2, y2, this.theme.themeLighter);
         }
 
         // render icon and get offset for text
@@ -85,7 +86,7 @@ public abstract class CenteredFlatWidget extends AbstractWidget {
     }
 
     private String truncateToFitWidth(Component text, int iconOffset) {
-        return this.truncateTextToFit(text.getString(), this.getWidth() - 14 - iconOffset);
+        return this.truncateTextToFit(text.getString(), this.getWidth() - Layout.PAGE_ENTRY_LABEL_END_PADDING - iconOffset);
     }
 
     public void setSelected(boolean selected) {
@@ -98,8 +99,8 @@ public abstract class CenteredFlatWidget extends AbstractWidget {
             return false;
         }
 
-        if (event.button() == 0 && this.isMouseOver(event.x(), event.y())) {
-            doAction();
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.isMouseOver(event.x(), event.y())) {
+            this.doAction();
 
             return true;
         }
@@ -113,7 +114,7 @@ public abstract class CenteredFlatWidget extends AbstractWidget {
             return false;
 
         if (event.isSelection()) {
-            doAction();
+            this.doAction();
             return true;
         }
 

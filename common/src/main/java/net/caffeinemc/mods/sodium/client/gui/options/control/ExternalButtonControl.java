@@ -1,5 +1,6 @@
 package net.caffeinemc.mods.sodium.client.gui.options.control;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import net.caffeinemc.mods.sodium.client.config.structure.ExternalButtonOption;
 import net.caffeinemc.mods.sodium.client.config.structure.Option;
@@ -19,6 +20,7 @@ import java.util.function.Consumer;
 
 public class ExternalButtonControl implements Control {
     public static final Component BASE_BUTTON_TEXT = Component.translatable("sodium.options.open_external_page_button");
+    public static final String EXTERNAL_PAGE_PREFIX = "▶ ";
 
     private final ExternalButtonOption option;
     private final Consumer<Screen> currentScreenConsumer;
@@ -94,7 +96,7 @@ public class ExternalButtonControl implements Control {
 
         @Override
         public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
-            if (this.option.isEnabled() && event.button() == 0 && this.isMouseOver(event.x(), event.y())) {
+            if (this.option.isEnabled() && event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.isMouseOver(event.x(), event.y())) {
                 this.openScreen(this.screen);
                 this.playClickSound();
 
@@ -106,7 +108,7 @@ public class ExternalButtonControl implements Control {
 
         @Override
         public boolean keyPressed(KeyEvent event) {
-            if (!isFocused()) return false;
+            if (!this.isFocused()) return false;
 
             if (event.isSelection()) {
                 this.openScreen(this.screen);

@@ -2,9 +2,6 @@ package net.caffeinemc.mods.sodium.client.compatibility.checks;
 
 import net.caffeinemc.mods.sodium.client.compatibility.environment.GlContextInfo;
 import net.caffeinemc.mods.sodium.client.compatibility.workarounds.nvidia.NvidiaWorkarounds;
-import net.caffeinemc.mods.sodium.client.console.Console;
-import net.caffeinemc.mods.sodium.client.console.message.MessageLevel;
-import net.caffeinemc.mods.sodium.client.platform.NativeWindowHandle;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -15,8 +12,8 @@ import org.slf4j.LoggerFactory;
 public class PostLaunchChecks {
     private static final Logger LOGGER = LoggerFactory.getLogger("Sodium-PostlaunchChecks");
 
-    public static void onContextInitialized(NativeWindowHandle window, GlContextInfo context) {
-        GraphicsDriverChecks.postContextInit(window, context);
+    public static void onContextInitialized(long pWindow, GlContextInfo context) {
+        GraphicsDriverChecks.postContextInit(pWindow, context);
         NvidiaWorkarounds.applyContextChanges(context);
 
         // FIXME: This can be determined earlier, but we can't access the GUI classes in pre-launch

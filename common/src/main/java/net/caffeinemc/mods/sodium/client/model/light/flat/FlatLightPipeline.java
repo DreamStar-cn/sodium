@@ -11,8 +11,9 @@ import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.LightCoordsUtil;
+import net.minecraft.world.level.BlockAndLightGetter;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.material.FluidState;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Arrays;
 
@@ -26,43 +27,43 @@ public class FlatLightPipeline implements LightPipeline {
     /**
      * The cache which light data will be accessed from.
      */
-    private final LightDataAccess lightCache;
+    protected final LightDataAccess lightCache;
 
     public FlatLightPipeline(LightDataAccess lightCache) {
         this.lightCache = lightCache;
     }
 
     @Override
-    public void calculate(ModelQuadView quad, BlockPos pos, QuadLightData out, Direction cullFace, Direction lightFace, boolean shade, boolean enhanced) {
+    public void calculate(ModelQuadView quad, BlockPos pos, QuadLightData out, Direction cullFace, Direction lightFace, @Nullable Direction shadeDirectionOverride, boolean enhanced) {
         int lightmap;
 
         // To match vanilla behavior, use the cull face if it exists/is available
         if (cullFace != null) {
-            lightmap = getOffsetLightmap(pos, cullFace);
-            Arrays.fill(out.br, getShade(this.lightCache.getLevel(), lightFace, shade));
+            lightmap = this.getOffsetLightmap(pos, cullFace);
+            Arrays.fill(out.br, this.getShade(this.lightCache.getLevel(), lightFace, shadeDirectionOverride));
         } else {
-            int flags = quad.getFlags();
+            int flags = quad.sodium$getFlags();
             // If the face is aligned, use the light data above it
             // To match vanilla behavior, also treat the face as aligned if it is parallel and the block state is a full cube
             if ((flags & ModelQuadFlags.IS_ALIGNED) != 0 || ((flags & ModelQuadFlags.IS_PARALLEL) != 0 && unpackFC(this.lightCache.get(pos)))) {
-                lightmap = getOffsetLightmap(pos, lightFace);
-                Arrays.fill(out.br, getShade(this.lightCache.getLevel(), lightFace, shade));
+                lightmap = this.getOffsetLightmap(pos, lightFace);
+                Arrays.fill(out.br, this.getShade(this.lightCache.getLevel(), lightFace, shadeDirectionOverride));
             } else {
                 lightmap = getEmissiveLightmap(this.lightCache.get(pos));
-                Arrays.fill(out.br, enhanced ? PlatformBlockAccess.getInstance().getNormalVectorShade(quad, this.lightCache.getLevel(), shade) : getShade(this.lightCache.getLevel(), lightFace, shade));
+                Arrays.fill(out.br, shadeDirectionOverride == null && enhanced ? PlatformBlockAccess.getInstance().getNormalVectorShade(quad, this.lightCache.getLevel(), true) : this.getShade(this.lightCache.getLevel(), lightFace, shadeDirectionOverride));
             }
         }
 
         Arrays.fill(out.lm, lightmap);
     }
 
-    private float getShade(BlockAndTintGetter level, Direction lightFace, boolean shade) {
-        return shade ? level.cardinalLighting().byFace(lightFace) : level.cardinalLighting().up();
+    float getShade(BlockAndTintGetter level, Direction lightFace, @Nullable Direction shadeDirectionOverride) {
+        return level.cardinalLighting().byFace(shadeDirectionOverride != null ? shadeDirectionOverride : lightFace);
     }
 
     /**
      * When vanilla computes an offset lightmap with flat lighting, it passes the original BlockState but the
-     * offset BlockPos to {@link LevelRenderer#getLightColor(BlockAndTintGetter, BlockState, BlockPos)}.
+     * offset BlockPos to {@link LevelRenderer#getLightCoords(LevelRenderer.BrightnessGetter, BlockAndLightGetter, BlockState, BlockPos)}.
      * This does not make much sense but fixes certain issues, primarily dark quads on light-emitting blocks
      * behind tinted glass. {@link LightDataAccess} cannot efficiently store lightmaps computed with
      * inconsistent values so this method exists to mirror vanilla behavior as closely as possible.

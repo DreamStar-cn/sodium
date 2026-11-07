@@ -1,18 +1,14 @@
 package net.caffeinemc.mods.sodium.mixin.features.gui.hooks.console;
 
 
-import com.llamalad7.mixinextras.sugar.Local;
+import com.mojang.blaze3d.Blaze3D;
 import net.caffeinemc.mods.sodium.client.gui.console.ConsoleHooks;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.renderer.GameRenderer;
-import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.state.GameRenderState;
-import net.minecraft.client.renderer.state.gui.GuiRenderState;
 import net.minecraft.util.profiling.Profiler;
-import net.minecraft.util.profiling.ProfilerFiller;
-import org.lwjgl.glfw.GLFW;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -25,11 +21,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class GameRendererMixin {
     @Shadow
     @Final
-    Minecraft minecraft;
-
-    @Shadow
-    @Final
-    private RenderBuffers renderBuffers;
+    private Minecraft minecraft;
 
     @Shadow
     @Final
@@ -38,11 +30,12 @@ public class GameRendererMixin {
     @Unique
     private static boolean HAS_RENDERED_OVERLAY_ONCE = false;
 
-    @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/render/GuiRenderer;render(Lcom/mojang/blaze3d/buffers/GpuBufferSlice;)V"))
-    private void onRender(DeltaTracker deltaTracker, boolean bl, CallbackInfo ci) {
+    @Inject(method = "render",
+            at = @At(value = "INVOKE", target = "Lnet/minecraft/client/gui/render/GuiRenderer;render()V"))
+    private void onRender(CallbackInfo ci) {
         // Do not start updating the console overlay until the font renderer is ready
         // This prevents the console from using tofu boxes for everything during early startup
-        if (Minecraft.getInstance().getOverlay() != null) {
+        if (Minecraft.getInstance().gui.overlay() != null) {
             if (!HAS_RENDERED_OVERLAY_ONCE) {
                 return;
             }
@@ -53,7 +46,7 @@ public class GameRendererMixin {
         int mouseY = (int)this.minecraft.mouseHandler.getScaledYPos(this.minecraft.getWindow());
         GuiGraphicsExtractor drawContext = new GuiGraphicsExtractor(this.minecraft, this.gameRenderState.guiRenderState, mouseX, mouseY);
 
-        ConsoleHooks.render(drawContext, GLFW.glfwGetTime());
+        ConsoleHooks.render(drawContext, Blaze3D.getTime());
 
         Profiler.get().pop();
 

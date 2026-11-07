@@ -11,13 +11,11 @@
   },
   "client": [
     "core.model.quad.BakedQuadMixin",
-    "features.render.model.ModelManagerMixin",
+    "features.render.model.ItemModelGeneratorMixin",
     "features.world.biome.BiomeMixin",
-    "platform.neoforge.AbstractBlockRenderContextMixin",
     "platform.neoforge.AuxiliaryLightManagerMixin",
     "platform.neoforge.ClientHooksMixin",
     "platform.neoforge.EntrypointMixin",
-    "platform.neoforge.LevelRendererMixin",
     "platform.neoforge.LevelSliceMixin",
     "platform.neoforge.ModelDataMixin",
     "platform.neoforge.ResourcePackLoaderMixin"

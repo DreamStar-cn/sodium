@@ -11,6 +11,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline.FluidRend
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.material.DefaultMaterials;
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.material.Material;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.TranslucentGeometryCollector;
+import net.caffeinemc.mods.sodium.client.render.helper.ColorHelper;
 import net.caffeinemc.mods.sodium.client.services.FluidRendererFactory;
 import net.caffeinemc.mods.sodium.client.world.LevelSlice;
 import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderHandler;
@@ -19,10 +20,10 @@ import net.fabricmc.fabric.api.client.render.fluid.v1.FluidRenderingRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.color.block.BlockTintSource;
 import net.minecraft.client.renderer.BiomeColors;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.FluidStateModelSet;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.FluidTags;
-import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
@@ -38,14 +39,14 @@ public class FluidRendererImpl extends FluidRenderer {
 
     public FluidRendererImpl(ColorProviderRegistry colorProviderRegistry, LightPipelineProvider lighters) {
         this.colorProviderRegistry = colorProviderRegistry;
-        defaultRenderer = new DefaultFluidRenderer(lighters);
-        defaultContext = new DefaultRenderContext();
+        this.defaultRenderer = new DefaultFluidRenderer(lighters);
+        this.defaultContext = new DefaultRenderContext();
         this.fluidStates = Minecraft.getInstance().getModelManager().getFluidStateModelSet();
-        this.fluidRenderer = new net.minecraft.client.renderer.block.FluidRenderer(fluidStates);
+        this.fluidRenderer = new net.minecraft.client.renderer.block.FluidRenderer(this.fluidStates);
     }
 
     public void render(LevelSlice level, BlockState blockState, FluidState fluidState, BlockPos blockPos, BlockPos offset, TranslucentGeometryCollector collector, ChunkBuildBuffers buffers) {
-        var material = DefaultMaterials.forChunkLayer(fluidStates.get(fluidState).layer());
+        var material = DefaultMaterials.forChunkLayer(this.fluidStates.get(fluidState).layer());
         var meshBuilder = buffers.get(material);
 
         FluidRenderHandler handler = FluidRenderingRegistry.get(fluidState.getType());
@@ -78,12 +79,12 @@ public class FluidRendererImpl extends FluidRenderer {
         // To allow invoking this method from the injector, where there is no local Sodium context, the renderer and
         // parameters are bundled into a DefaultRenderContext which is stored in a ThreadLocal.
 
-        defaultContext.setUp(this.colorProviderRegistry, this.defaultRenderer, level, blockState, fluidState, blockPos, offset, collector, meshBuilder, material, handler, hasModOverride, fluidStates);
+        this.defaultContext.setUp(this.colorProviderRegistry, this.defaultRenderer, level, blockState, fluidState, blockPos, offset, collector, meshBuilder, material, handler, hasModOverride, this.fluidStates);
 
         try {
-            FluidRendering.render(fluidRenderer, handler, level, blockPos, i -> meshBuilder.asFallbackVertexConsumer(DefaultMaterials.forChunkLayer(i), collector), blockState, fluidState, defaultContext);
+            FluidRendering.render(this.fluidRenderer, handler, level, blockPos, i -> meshBuilder.asFallbackVertexConsumer(DefaultMaterials.forChunkLayer(i), collector), blockState, fluidState, this.defaultContext);
         } finally {
-            defaultContext.clear();
+            this.defaultContext.clear();
         }
     }
 
@@ -135,7 +136,7 @@ public class FluidRendererImpl extends FluidRenderer {
         public ColorProvider<FluidState> getColorProvider(Fluid fluid, @Nullable BlockTintSource blockTintSource) {
             var override = this.colorProviderRegistry.getColorProvider(fluid);
 
-            if (!hasModOverride && override != null) {
+            if (this.hasModOverride && override != null) {
                 return override;
             }
 
@@ -144,9 +145,9 @@ public class FluidRendererImpl extends FluidRenderer {
 
         @Override
         public void render(net.minecraft.client.renderer.block.FluidRenderer fluidRenderer, FluidRenderHandler handler, BlockAndTintGetter level, BlockPos pos, net.minecraft.client.renderer.block.FluidRenderer.Output output, BlockState blockState, FluidState fluidState) {
-            var model = modelSet.get(this.fluidState);
+            var model = this.modelSet.get(this.fluidState);
             this.renderer.render(this.level, this.blockState, this.fluidState, this.blockPos, this.offset, this.collector, this.meshBuilder, this.material,
-                    getColorProvider(fluidState.getType(), model.tintSource()), model);
+                    this.getColorProvider(fluidState.getType(), model.tintSource()), model);
         }
     }
 
@@ -161,7 +162,7 @@ public class FluidRendererImpl extends FluidRenderer {
             return new BlendedColorProvider<>() {
                 @Override
                 protected int getColor(LevelSlice slice, FluidState state, BlockPos pos) {
-                    return BiomeColors.getAverageWaterColor(slice, pos) | 0xFF000000;
+                    return ColorHelper.makeOpaqueIfTransparent(BiomeColors.getAverageWaterColor(slice, pos));
                 }
             };
         }
@@ -171,7 +172,7 @@ public class FluidRendererImpl extends FluidRenderer {
             return new BlendedColorProvider<>() {
                 @Override
                 protected int getColor(LevelSlice slice, BlockState state, BlockPos pos) {
-                    return BiomeColors.getAverageWaterColor(slice, pos) | 0xFF000000;
+                    return ColorHelper.makeOpaqueIfTransparent(BiomeColors.getAverageWaterColor(slice, pos));
                 }
             };
         }

@@ -2,7 +2,6 @@ package net.caffeinemc.mods.sodium.client.gui.options.control;
 
 import com.mojang.blaze3d.platform.Monitor;
 import net.caffeinemc.mods.sodium.api.config.option.ControlValueFormatter;
-import net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
 
@@ -20,13 +19,12 @@ public class ControlValueFormatterImpls {
         return (v) -> {
             Monitor monitor = Minecraft.getInstance().getWindow().findBestMonitor();
 
-            var os = OsUtils.getOs();
-            if (monitor == null || !(os == OsUtils.OperatingSystem.WIN || os == OsUtils.OperatingSystem.MAC)) {
+            if (monitor == null) {
                 return Component.empty();
             } else if (0 == v) {
                 return Component.translatable("options.fullscreen.current");
             } else {
-                return Component.literal(monitor.getMode(Math.min(v - 1, monitor.getModeCount() - 1)).toString().replace(" (24bit)", ""));
+                return Component.literal(monitor.mode(Math.min(v - 1, monitor.modeCount() - 1)).toString().replace(" (24bit)", ""));
             }
         };
     }

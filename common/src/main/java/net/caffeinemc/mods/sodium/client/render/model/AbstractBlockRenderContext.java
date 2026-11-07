@@ -1,6 +1,6 @@
 package net.caffeinemc.mods.sodium.client.render.model;
 
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
+import com.google.common.base.Suppliers;
 import net.caffeinemc.mods.sodium.client.model.light.LightMode;
 import net.caffeinemc.mods.sodium.client.model.light.LightPipeline;
 import net.caffeinemc.mods.sodium.client.model.light.LightPipelineProvider;
@@ -10,18 +10,15 @@ import net.caffeinemc.mods.sodium.client.render.helper.ColorHelper;
 import net.caffeinemc.mods.sodium.client.render.helper.ModelHelper;
 import net.caffeinemc.mods.sodium.client.services.PlatformBlockAccess;
 import net.caffeinemc.mods.sodium.client.services.PlatformModelAccess;
-import net.caffeinemc.mods.sodium.client.services.SodiumModelData;
 import net.caffeinemc.mods.sodium.client.util.DirectionUtil;
 import net.caffeinemc.mods.sodium.client.world.LevelSlice;
-import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.util.LightCoordsUtil;
 import net.minecraft.util.RandomSource;
-import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.jspecify.annotations.Nullable;
@@ -29,6 +26,7 @@ import org.jspecify.annotations.Nullable;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 /**
  * Base class for the functions that can be shared between the terrain and non-terrain pipelines.
@@ -38,13 +36,13 @@ import java.util.function.Predicate;
 public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
     public class BlockEmitter extends MutableQuadViewImpl {
         {
-            data = new int[EncodingFormat.TOTAL_STRIDE];
-            clear();
+            this.data = new int[EncodingFormat.TOTAL_STRIDE];
+            this.clear();
         }
 
         @Override
         public void emitDirectly() {
-            renderQuad(this);
+            AbstractBlockRenderContext.this.renderQuad(this);
         }
 
         public void emitPart(BlockStateModelPart part, Predicate<@Nullable Direction> cullTest, Consumer<MutableQuadViewImpl> emitter) {
@@ -73,9 +71,9 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
      */
     protected BlockPos pos;
 
-    private final ShapeComparisonCache occlusionCache = new ShapeComparisonCache();
+    private final Supplier<ShapeComparisonCache> occlusionCache = Suppliers.memoize(ShapeComparisonCache::new);
     private final BlockPos.MutableBlockPos cachedPositionObject = new BlockPos.MutableBlockPos();
-    private boolean enableCulling = true;
+    protected boolean enableCulling = true;
     // Cull cache (as it's checked per-quad instead of once per side like in vanilla)
     private int cullCompletionFlags;
     private int cullResultFlags;
@@ -144,7 +142,7 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
         }
 
         // No other simplifications apply, so we need to perform a full shape comparison, which is very slow
-        return this.occlusionCache.lookup(selfShape, neighborShape);
+        return this.occlusionCache.get().lookup(selfShape, neighborShape);
     }
 
     public boolean isFaceCulled(@Nullable Direction face) {
@@ -171,7 +169,7 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
     /**
      * Pipeline entrypoint - handles transform and culling checks.
      */
-    private void renderQuad(MutableQuadViewImpl quad) {
+    protected void renderQuad(MutableQuadViewImpl quad) {
         if (this.isFaceCulled(quad.getCullFace())) {
             return;
         }
@@ -194,13 +192,13 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
     protected void prepareAoInfo(boolean modelAo) {
         this.useAmbientOcclusion = this.slice.useAmbientOcclusion();
         // Ignore the incorrect IDEA warning here.
-        this.defaultLightMode = this.useAmbientOcclusion && modelAo && (state != null && PlatformBlockAccess.getInstance().getLightEmission(state, level, pos) == 0) ? LightMode.SMOOTH : LightMode.FLAT;
+        this.defaultLightMode = this.useAmbientOcclusion && modelAo && (this.state != null && PlatformBlockAccess.getInstance().getLightEmission(this.state, this.level, this.pos) == 0) ? LightMode.SMOOTH : LightMode.FLAT;
     }
 
     protected void shadeQuad(MutableQuadViewImpl quad, LightMode lightMode, boolean emissive, SodiumShadeMode shadeMode) {
         LightPipeline lighter = this.lighters.getLighter(lightMode);
         QuadLightData data = this.quadLightData;
-        lighter.calculate(quad, this.pos, data, quad.getCullFace(), quad.getLightFace(), quad.hasShade(), shadeMode == SodiumShadeMode.ENHANCED);
+        lighter.calculate(quad, this.pos, data, quad.getCullFace(), quad.sodium$getLightFace(), quad.shadeDirectionOverride(), shadeMode == SodiumShadeMode.ENHANCED);
 
         if (emissive) {
             for (int i = 0; i < 4; i++) {
@@ -210,12 +208,10 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
             int[] lightmaps = data.lm;
 
             for (int i = 0; i < 4; i++) {
-                quad.setLight(i, ColorHelper.maxBrightness(quad.getLight(i), lightmaps[i]));
+                quad.setLight(i, ColorHelper.maxBrightness(quad.sodium$getLight(i), lightmaps[i]));
             }
         }
     }
-
-    private List<BlockStateModelPart> parts = new ObjectArrayList<>();
 
     /* Handling of vanilla models - this is the hot path for non-modded models */
     public void bufferDefaultModel(BlockStateModelPart part, Predicate<Direction> cullTest, Consumer<MutableQuadViewImpl> emitter) {
@@ -230,16 +226,16 @@ public abstract class AbstractBlockRenderContext extends AbstractRenderContext {
             }
 
             // TODO NeoForge 1.21.5
-            final List<BakedQuad> quads = PlatformModelAccess.getInstance().getQuads(level, pos, part, state, cullFace, random);
+            final List<BakedQuad> quads = PlatformModelAccess.getInstance().getQuads(this.level, this.pos, part, this.state, cullFace, this.random);
             final int count = quads.size();
-            AmbientOcclusionMode ao = PlatformBlockAccess.getInstance().usesAmbientOcclusion(part, state, null, slice, pos);
+            AmbientOcclusionMode ao = PlatformBlockAccess.getInstance().usesAmbientOcclusion(part, this.state, null, this.slice, this.pos);
 
             for (int j = 0; j < count; j++) {
                 final BakedQuad q = quads.get(j);
                 editorQuad.fromBakedQuad(q);
                 editorQuad.setCullFace(cullFace);
-                editorQuad.setRenderType(q.materialInfo().layer());
                 editorQuad.setAmbientOcclusion(ao.toTriState());
+                editorQuad.setShadeMode(SodiumShadeMode.ENHANCED);
                 // Call processQuad instead of emit for efficiency
                 // (avoid unnecessarily clearing data, trying to apply transforms, and performing cull check again)
 

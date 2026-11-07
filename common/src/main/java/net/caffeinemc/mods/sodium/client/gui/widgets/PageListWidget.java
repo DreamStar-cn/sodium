@@ -13,6 +13,7 @@ import net.caffeinemc.mods.sodium.client.gui.Colors;
 import net.caffeinemc.mods.sodium.client.gui.Layout;
 import net.caffeinemc.mods.sodium.client.gui.VideoSettingsScreen;
 import net.caffeinemc.mods.sodium.client.gui.options.control.AbstractScrollable;
+import net.caffeinemc.mods.sodium.client.gui.options.control.ExternalButtonControl;
 import net.caffeinemc.mods.sodium.client.util.Dim2i;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
@@ -39,8 +40,8 @@ public class PageListWidget extends AbstractScrollable {
         this.clearChildren();
         this.scrollbar = this.addRenderableChild(new ScrollbarWidget(new Dim2i(this.getLimitX() - Layout.SCROLLBAR_WIDTH, y, Layout.SCROLLBAR_WIDTH, height), false, false));
 
-        int entryHeight = this.font.lineHeight * 2;
-        var headerHeight = this.font.lineHeight * 3;
+        int entryHeight = Layout.entryHeight(this.font);
+        var headerHeight = Layout.pageHeaderHeight(this.font);
         int listHeight = 0;
         for (var modOptions : ConfigManager.CONFIG.getModOptions()) {
             if (modOptions.pages().isEmpty()) {
@@ -123,17 +124,13 @@ public class PageListWidget extends AbstractScrollable {
         this.switchSelectedWidget(this.pageToWidget.get(page));
     }
 
-    private class EntryWidget extends CenteredFlatWidget {
+    private abstract class EntryWidget extends CenteredFlatWidget {
         EntryWidget(Dim2i dim, Component label, boolean isSelectable, ColorTheme theme) {
             super(dim, label, isSelectable, theme);
         }
 
         EntryWidget(Dim2i dim, Component label, Component subtitle, boolean isSelectable, ColorTheme theme) {
             super(dim, label, subtitle, isSelectable, theme);
-        }
-
-        @Override
-        void onAction() {
         }
 
         public int getScrollTargetStart() {
@@ -146,12 +143,33 @@ public class PageListWidget extends AbstractScrollable {
         }
     }
 
-    private class HeaderEntryWidget extends EntryWidget {
+    private abstract class ClickableEntryWidget extends EntryWidget {
+        ClickableEntryWidget(Dim2i dim, Component label, boolean isSelectable, ColorTheme theme) {
+            super(dim, label, isSelectable, theme);
+        }
+
+        ClickableEntryWidget(Dim2i dim, Component label, Component subtitle, boolean isSelectable, ColorTheme theme) {
+            super(dim, label, subtitle, isSelectable, theme);
+        }
+
+        @Override
+        public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+            super.extractRenderState(graphics, mouseX, mouseY, delta);
+
+            if (this.isHovered()) {
+                graphics.requestCursor(CursorTypes.POINTING_HAND);
+            }
+        }
+    }
+
+    private class HeaderEntryWidget extends ClickableEntryWidget {
+        private final ModOptions modOptions;
         private final Identifier icon;
         private final boolean iconMonochrome;
 
         HeaderEntryWidget(Dim2i dim, ModOptions modOptions, ColorTheme theme) {
             super(dim, Component.literal(modOptions.name()), Component.literal(modOptions.version()), false, theme);
+            this.modOptions = modOptions;
             this.icon = modOptions.icon();
             this.iconMonochrome = modOptions.iconMonochrome();
         }
@@ -165,31 +183,37 @@ public class PageListWidget extends AbstractScrollable {
             return VideoSettingsScreen.renderIconWithSpacing(graphics, this.icon, textColor, this.iconMonochrome,
                     this.getX(), this.getY(), this.getHeight(), Layout.ICON_MARGIN);
         }
+
+        @Override
+        void onAction() {
+            var pages = this.modOptions.pages();
+            if (pages.isEmpty()) {
+                return;
+            }
+
+            var firstPage = pages.getFirst();
+            var firstPageWidget = PageListWidget.this.pageToWidget.get(firstPage);
+            if (firstPageWidget != null) {
+                PageListWidget.this.switchSelectedWidget(firstPageWidget);
+            }
+            PageListWidget.this.parent.jumpToPage(firstPage);
+        }
     }
 
-    private abstract class PageEntryWidget<P extends Page> extends EntryWidget {
+    private abstract class PageEntryWidget<P extends Page> extends ClickableEntryWidget {
         final P page;
         final int scrollTargetStart;
 
-        PageEntryWidget(Dim2i dim, P page, ColorTheme theme, int scrollTargetStart) {
-            super(dim, page.name(), true, theme);
+        PageEntryWidget(Dim2i dim, P page, Component label, ColorTheme theme, int scrollTargetStart) {
+            super(dim, label, true, theme);
             this.page = page;
             this.scrollTargetStart = scrollTargetStart;
-        }
-
-        @Override
-        public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
-            super.extractRenderState(graphics, mouseX, mouseY, delta);
-
-            if (this.isHovered()) {
-                graphics.requestCursor(CursorTypes.POINTING_HAND);
-            }
         }
     }
 
     private class OptionPageEntryWidget extends PageEntryWidget<Page> {
         OptionPageEntryWidget(Dim2i dim, Page page, ColorTheme theme, int scrollTargetStart) {
-            super(dim, page, theme, scrollTargetStart);
+            super(dim, page, page.name(), theme, scrollTargetStart);
         }
 
         @Override
@@ -206,7 +230,7 @@ public class PageListWidget extends AbstractScrollable {
 
     private class ExternalPageEntryWidget extends PageEntryWidget<ExternalPage> {
         ExternalPageEntryWidget(Dim2i dim, ExternalPage page, ColorTheme theme, int scrollTargetStart) {
-            super(dim, page, theme, scrollTargetStart);
+            super(dim, page, Component.literal(ExternalButtonControl.EXTERNAL_PAGE_PREFIX).append(page.name()), theme, scrollTargetStart);
         }
 
         @Override

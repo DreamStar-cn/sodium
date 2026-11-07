@@ -1,12 +1,12 @@
 package net.caffeinemc.mods.sodium.mixin.core.render.immediate.consumer;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.mojang.blaze3d.vertex.VertexFormat;
-import com.mojang.blaze3d.vertex.VertexFormatElement;
+import com.mojang.renderpearl.api.vertex.VertexFormat;
 import net.caffeinemc.mods.sodium.api.vertex.attributes.common.TextureAttribute;
-import net.minecraft.client.renderer.SpriteCoordinateExpander;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter;
+import net.caffeinemc.mods.sodium.client.render.vertex.VertexFormatOffsetCache;
+import net.minecraft.client.renderer.SpriteCoordinateExpander;
+import net.minecraft.client.renderer.texture.UvMapping;
 import org.lwjgl.system.MemoryStack;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,38 +22,28 @@ public class SpriteCoordinateExpanderMixin implements VertexBufferWriter {
     @Final
     private VertexConsumer delegate;
 
+    @Shadow
+    @Final
+    private UvMapping mapping;
     @Unique
     private boolean canUseIntrinsics;
 
-    @Unique
-    private float minU, minV;
-
-    @Unique
-    private float maxU, maxV;
-
     @Inject(method = "<init>", at = @At("RETURN"))
-    private void onInit(VertexConsumer delegate, TextureAtlasSprite sprite, CallbackInfo ci) {
-        this.minU = sprite.getU0();
-        this.minV = sprite.getV0();
-
-        this.maxU = sprite.getU1();
-        this.maxV = sprite.getV1();
-
-        this.canUseIntrinsics = VertexBufferWriter.tryOf(this.delegate) != null;
+    private void onInit(VertexConsumer delegate, UvMapping mapping, CallbackInfo ci) {
+        this.canUseIntrinsics = VertexBufferWriter.sodium$tryOf(this.delegate) != null;
     }
 
     @Override
-    public boolean canUseIntrinsics() {
+    public boolean sodium$canUseIntrinsics() {
         return this.canUseIntrinsics;
     }
 
     @Override
-    public void push(MemoryStack stack, final long ptr, int count, VertexFormat format) {
-        transform(ptr, count, format,
-                this.minU, this.minV, this.maxU, this.maxV);
+    public void sodium$push(MemoryStack stack, final long ptr, int count, VertexFormat format) {
+        transform(ptr, count, format, this.mapping);
 
-        VertexBufferWriter.of(this.delegate)
-                .push(stack, ptr, count, format);
+        VertexBufferWriter.sodium$of(this.delegate)
+                .sodium$push(stack, ptr, count, format);
     }
 
     /**
@@ -63,20 +53,16 @@ public class SpriteCoordinateExpanderMixin implements VertexBufferWriter {
      * @param ptr    The buffer of vertices to transform
      * @param count  The number of vertices to transform
      * @param format The format of the vertices
-     * @param minU   The minimum X-coordinate of the sprite bounds
-     * @param minV   The minimum Y-coordinate of the sprite bounds
-     * @param maxU   The maximum X-coordinate of the sprite bounds
-     * @param maxV   The maximum Y-coordinate of the sprite bounds
+     * @param mapping The UV mapping
      */
     @Unique
     private static void transform(long ptr, int count, VertexFormat format,
-                                  float minU, float minV, float maxU, float maxV) {
+                                  UvMapping mapping) {
         long stride = format.getVertexSize();
-        long offsetUV = format.getOffset(VertexFormatElement.UV0);
 
-        // The width/height of the sprite
-        float w = maxU - minU;
-        float h = maxV - minV;
+        var cache = VertexFormatOffsetCache.getInstance().getCachedOffsets(format);
+
+        var offsetUV = cache[VertexFormatOffsetCache.UV];
 
         for (int vertexIndex = 0; vertexIndex < count; vertexIndex++) {
             // The texture coordinates relative to the sprite bounds
@@ -84,8 +70,8 @@ public class SpriteCoordinateExpanderMixin implements VertexBufferWriter {
             float v = TextureAttribute.getV(ptr + offsetUV);
 
             // The texture coordinates in absolute space on the sprite sheet
-            float ut = minU + (w * u);
-            float vt = minV + (h * v);
+            float ut = mapping.getU(u);
+            float vt = mapping.getV(v);
 
             TextureAttribute.put(ptr + offsetUV, ut, vt);
 

@@ -10,6 +10,7 @@ import org.joml.Vector3fc;
 
 import java.nio.IntBuffer;
 import java.util.function.IntConsumer;
+import java.util.function.Supplier;
 
 /**
  * Performs dynamic topo sorting and falls back to distance sorting as
@@ -34,32 +35,46 @@ public class DynamicTopoData extends DynamicData {
     private static final int PATIENT_TOPO_ATTEMPTS = 5;
     private static final int REGULAR_TOPO_ATTEMPTS = 2;
 
-    private boolean GFNITrigger = true;
-    private boolean directTrigger = false;
+    private boolean GFNITrigger;
+    private boolean directTrigger;
     private int consecutiveTopoSortFailures = 0;
 
     private double directTriggerKey = -1;
     private boolean pendingTriggerIsDirect;
 
-    private final TQuad[] quads;
-    private final Object2ReferenceMap<Vector3fc, float[]> distancesByNormal;
+    private TQuad[] quads;
+    private Vector3fc[] centroids;
+    private Object2ReferenceMap<Vector3fc, float[]> distancesByNormal;
 
     private DynamicTopoData(SectionPos sectionPos, TQuad[] quads,
                             GeometryPlanes geometryPlanes, Vector3dc initialCameraPos,
-                            Object2ReferenceMap<Vector3fc, float[]> distancesByNormal) {
+                            Supplier<Object2ReferenceMap<Vector3fc, float[]>> distancesByNormal) {
         super(sectionPos, quads.length, geometryPlanes, initialCameraPos);
-        this.quads = quads;
-        this.distancesByNormal = distancesByNormal;
 
         if (this.getInputQuadCount() > MAX_TOPO_SORT_QUADS) {
             this.directTrigger = true;
             this.GFNITrigger = false;
+
+            this.computeCentroids(quads);
+        } else {
+            this.directTrigger = false;
+            this.GFNITrigger = true;
+
+            this.quads = quads;
+            this.distancesByNormal = distancesByNormal.get();
+        }
+    }
+
+    private void computeCentroids(TQuad[] quads) {
+        this.centroids = new Vector3fc[quads.length];
+        for (int i = 0; i < quads.length; i++) {
+            this.centroids[i] = quads[i].getCenter();
         }
     }
 
     @Override
-    public DynamicSorter getSorter() {
-        return new DynamicTopoSorter(this.getInputQuadCount(), this, this.pendingTriggerIsDirect, this.consecutiveTopoSortFailures, this.GFNITrigger, this.directTrigger);
+    public DynamicSorter getSorter(boolean initial) {
+        return new DynamicTopoSorter(this.getInputQuadCount(), this.pendingTriggerIsDirect, initial, this.consecutiveTopoSortFailures, this.GFNITrigger, this.directTrigger, this.quads, this.centroids, this.distancesByNormal);
     }
 
     public boolean GFNITriggerEnabled() {
@@ -78,13 +93,15 @@ public class DynamicTopoData extends DynamicData {
         this.directTriggerKey = key;
     }
 
-    public boolean isMatchingSorter(DynamicTopoSorter sorter) {
-        return sorter.parent == this;
-    }
-
     public boolean checkAndApplyGFNITriggerOff(DynamicTopoSorter sorter) {
         if (this.GFNITrigger && !sorter.GFNITrigger) {
             this.GFNITrigger = false;
+
+            // once the GFNI trigger is turned off, the topo sort data is never used again, so it can be freed to save memory.
+            this.computeCentroids(this.quads);
+            this.quads = null;
+            this.distancesByNormal = null;
+
             return true;
         }
         return false;
@@ -114,20 +131,14 @@ public class DynamicTopoData extends DynamicData {
         }
     }
 
-    private void copyStateFrom(DynamicTopoSorter sorter) {
-        this.GFNITrigger = sorter.GFNITrigger;
-        this.directTrigger = sorter.directTrigger;
-        this.consecutiveTopoSortFailures = sorter.consecutiveTopoSortFailuresNew;
-    }
-
     @Override
     public void prepareTrigger(boolean isDirectTrigger) {
         this.pendingTriggerIsDirect = isDirectTrigger;
     }
 
     public class DynamicTopoSorter extends DynamicSorter implements IntConsumer {
-        private final DynamicTopoData parent;
         private final boolean isDirectTrigger;
+        private final boolean initial;
         private final int consecutiveTopoSortFailures;
 
         private boolean directTrigger;
@@ -136,14 +147,22 @@ public class DynamicTopoData extends DynamicData {
 
         private IntBuffer intBuffer;
 
-        private DynamicTopoSorter(int quadCount, DynamicTopoData parent, boolean isDirectTrigger, int consecutiveTopoSortFailures, boolean GFNITrigger, boolean directTrigger) {
-            super(quadCount);
-            this.parent = parent;
+        private final TQuad[] quads;
+        private final Vector3fc[] centroids;
+        private final Object2ReferenceMap<Vector3fc, float[]> distancesByNormal;
+
+        private DynamicTopoSorter(int quadCount, boolean isDirectTrigger, boolean initial, int consecutiveTopoSortFailures, boolean GFNITrigger, boolean directTrigger, TQuad[] quads, Vector3fc[] centroids, Object2ReferenceMap<Vector3fc, float[]> distancesByNormal) {
+            super(quadCount, DynamicTopoData.this, DynamicTopoData.this.geometryPlanes);
             this.isDirectTrigger = isDirectTrigger;
+            this.initial = initial;
             this.consecutiveTopoSortFailures = consecutiveTopoSortFailures;
             this.consecutiveTopoSortFailuresNew = consecutiveTopoSortFailures;
             this.GFNITrigger = GFNITrigger;
             this.directTrigger = directTrigger;
+
+            this.quads = quads;
+            this.centroids = centroids;
+            this.distancesByNormal = distancesByNormal;
         }
 
         private static int getAttemptsForTime(long ns) {
@@ -164,23 +183,23 @@ public class DynamicTopoData extends DynamicData {
         }
 
         @Override
-        void writeSort(CombinedCameraPos cameraPos, boolean initial) {
+        void writeSort(CombinedCameraPos cameraPos) {
             // uses a topo sort or a distance sort depending on what is enabled
             IntBuffer indexBuffer = this.getIntBuffer();
 
             if (this.GFNITrigger && !this.isDirectTrigger) {
                 this.intBuffer = indexBuffer;
-                var sortStart = initial ? 0 : System.nanoTime();
-                var result = TopoGraphSorting.topoGraphSort(this, DynamicTopoData.this.quads, DynamicTopoData.this.distancesByNormal, cameraPos.getRelativeCameraPos(), false);
+                var sortStart = this.initial ? 0 : System.nanoTime();
+                var result = TopoGraphSorting.topoGraphSort(this, this.quads, this.distancesByNormal, cameraPos.getRelativeCameraPos(), false);
                 this.intBuffer = null;
 
-                var sortTime = initial ? 0 : System.nanoTime() - sortStart;
+                var sortTime = this.initial ? 0 : System.nanoTime() - sortStart;
 
                 // if we've already failed, there's reduced patience for sorting since the
                 // probability of failure and wasted compute time is higher. Initial sorting is
-                // often very slow when the cpu is loaded and the JIT isn't ready yet, so it's
+                // often very slow when the cpu is loaded, and the JIT isn't ready yet, so it's
                 // ignored here.
-                if (!initial && sortTime > (this.consecutiveTopoSortFailuresNew > 0
+                if (!this.initial && sortTime > (this.consecutiveTopoSortFailuresNew > 0
                         ? MAX_FAILING_TOPO_SORT_TIME_NS
                         : MAX_TOPO_SORT_TIME_NS)) {
                     this.directTrigger = true;
@@ -205,11 +224,7 @@ public class DynamicTopoData extends DynamicData {
 
             if (this.directTrigger) {
                 indexBuffer.rewind();
-                distanceSortDirect(indexBuffer, DynamicTopoData.this.quads, cameraPos.getRelativeCameraPos());
-            }
-
-            if (initial) {
-                DynamicTopoData.this.copyStateFrom(this);
+                distanceSortDirect(indexBuffer, this.centroids, this.quads, cameraPos.getRelativeCameraPos());
             }
         }
     }
@@ -218,31 +233,41 @@ public class DynamicTopoData extends DynamicData {
      * Sorts the given quads by descending center distance to the camera and writes
      * the resulting order to the given index buffer.
      */
-    static void distanceSortDirect(IntBuffer indexBuffer, TQuad[] quads, Vector3fc cameraPos) {
-        if (quads.length <= 1) {
+    static void distanceSortDirect(IntBuffer indexBuffer, Vector3fc[] centroids, TQuad[] quads, Vector3fc cameraPos) {
+        int count;
+        if (centroids != null) {
+            count = centroids.length;
+        } else {
+            count = quads.length;
+        }
+
+        if (count <= 1) {
             // Avoid allocations when there is nothing to sort.
             TranslucentData.writeQuadVertexIndexes(indexBuffer, 0);
         } else {
-            final var keys = new int[quads.length];
-            final var perm = new int[quads.length];
+            final var keys = new int[count];
+            final var perm = new int[count];
 
-            for (int idx = 0; idx < quads.length; idx++) {
-                var centroid = quads[idx].getCenter();
+            for (int idx = 0; idx < count; idx++) {
+                Vector3fc centroid;
+                if (centroids != null) {
+                    centroid = centroids[idx];
+                } else {
+                    centroid = quads[idx].getCenter();
+                }
                 keys[idx] = ~Float.floatToRawIntBits(centroid.distanceSquared(cameraPos));
                 perm[idx] = idx;
             }
 
             RadixSort.sortIndirect(perm, keys, false);
 
-            for (int idx = 0; idx < quads.length; idx++) {
+            for (int idx = 0; idx < count; idx++) {
                 TranslucentData.writeQuadVertexIndexes(indexBuffer, perm[idx]);
             }
         }
     }
 
     public static DynamicTopoData fromMesh(CombinedCameraPos cameraPos, TQuad[] quads, SectionPos sectionPos, GeometryPlanes geometryPlanes) {
-        var distancesByNormal = geometryPlanes.prepareAndGetDistances();
-
-        return new DynamicTopoData(sectionPos, quads, geometryPlanes, cameraPos.getAbsoluteCameraPos(), distancesByNormal);
+        return new DynamicTopoData(sectionPos, quads, geometryPlanes, cameraPos.getAbsoluteCameraPos(), geometryPlanes::prepareAndGetDistances);
     }
 }

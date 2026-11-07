@@ -45,7 +45,7 @@ public class ChunkVertexConsumer implements VertexConsumer {
         vertex.z = z;
         vertex.ao = 1.0f;
         this.writtenAttributes |= ATTRIBUTE_POSITION_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     // Writing color ignores alpha since alpha is used as a color multiplier by Sodium.
@@ -54,7 +54,7 @@ public class ChunkVertexConsumer implements VertexConsumer {
         ChunkVertexEncoder.Vertex vertex = this.vertices[this.vertexIndex];
         vertex.color = ColorABGR.pack(red, green, blue, alpha);
         this.writtenAttributes |= ATTRIBUTE_COLOR_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
@@ -62,7 +62,7 @@ public class ChunkVertexConsumer implements VertexConsumer {
         ChunkVertexEncoder.Vertex vertex = this.vertices[this.vertexIndex];
         vertex.color = ColorABGR.pack(red, green, blue, alpha);
         this.writtenAttributes |= ATTRIBUTE_COLOR_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
@@ -70,7 +70,7 @@ public class ChunkVertexConsumer implements VertexConsumer {
         ChunkVertexEncoder.Vertex vertex = this.vertices[this.vertexIndex];
         vertex.color = ColorARGB.toABGR(argb);
         this.writtenAttributes |= ATTRIBUTE_COLOR_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
@@ -79,18 +79,18 @@ public class ChunkVertexConsumer implements VertexConsumer {
         vertex.u = u;
         vertex.v = v;
         this.writtenAttributes |= ATTRIBUTE_TEXTURE_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     // Overlay is ignored for chunk geometry.
     @Override
     public @NonNull VertexConsumer setUv1(int u, int v) {
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
     public @NonNull VertexConsumer setOverlay(int uv) {
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
@@ -98,7 +98,12 @@ public class ChunkVertexConsumer implements VertexConsumer {
         ChunkVertexEncoder.Vertex vertex = this.vertices[this.vertexIndex];
         vertex.light = ((v & 0xFFFF) << 16) | (u & 0xFFFF);
         this.writtenAttributes |= ATTRIBUTE_LIGHT_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
+    }
+
+    @Override
+    public VertexConsumer setUv3(float u, float v) {
+        return this.potentiallyEndVertex();
     }
 
     @Override
@@ -106,18 +111,18 @@ public class ChunkVertexConsumer implements VertexConsumer {
         ChunkVertexEncoder.Vertex vertex = this.vertices[this.vertexIndex];
         vertex.light = uv;
         this.writtenAttributes |= ATTRIBUTE_LIGHT_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
     public @NonNull VertexConsumer setNormal(float x, float y, float z) {
         this.writtenAttributes |= ATTRIBUTE_NORMAL_BIT;
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     @Override
     public VertexConsumer setLineWidth(float f) {
-        return potentiallyEndVertex();
+        return this.potentiallyEndVertex();
     }
 
     public VertexConsumer potentiallyEndVertex() {
@@ -129,14 +134,15 @@ public class ChunkVertexConsumer implements VertexConsumer {
         this.writtenAttributes = 0;
 
         if (this.vertexIndex == 4) {
-            int normal = calculateNormal();
+            int normal = this.calculateNormal();
 
             ModelQuadFacing cullFace = ModelQuadFacing.fromPackedNormal(normal);
 
             // let the collector intercept the quad but discard it if it's deemed invalid (i.e. not visible)
             if (this.material.isTranslucent() && this.collector != null &&
                     this.collector.appendQuad(this.vertices, cullFace, normal)) {
-               return this;
+                this.vertexIndex = 0;
+                return this;
             }
 
             this.modelBuilder.getVertexBuffer(cullFace).push(this.vertices, this.material);

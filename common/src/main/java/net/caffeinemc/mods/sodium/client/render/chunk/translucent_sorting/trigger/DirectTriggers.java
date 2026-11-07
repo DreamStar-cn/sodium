@@ -1,20 +1,19 @@
 package net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.trigger;
 
-import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.DynamicTopoData;
-import org.joml.Vector3d;
-import org.joml.Vector3dc;
-
 import it.unimi.dsi.fastutil.doubles.Double2ObjectRBTreeMap;
+import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.DynamicTopoData;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.TranslucentData;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.trigger.SortTriggering.SectionTriggers;
 import net.minecraft.core.SectionPos;
+import org.joml.Vector3d;
+import org.joml.Vector3dc;
 
 /**
  * Performs direct triggering for sections that are sorted by distance. Direct
  * triggering means the section is not triggered based on its geometry but
  * rather the movement of the camera relative to the last position the camera
  * was in when the section was sorted last.
- * 
+ * <p>
  * There are two types of direct triggering: Distance triggering is used when
  * the camera is close to or inside the section. Angle triggering is used
  * otherwise. Distance triggering sorts the section when the camera has moved at
@@ -27,13 +26,13 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
      * A tree map of the directly triggered sections, indexed by their
      * minimum required camera movement. When the given camera movement is exceeded,
      * they are tested for triggering the angle or distance condition.
-     * 
+     * <p>
      * The accumulated distance is monotonically increasing and is never reset. This
      * only becomes a problem when the camera moves more than 10^15 blocks in total.
      * There will be precision issues at around 10^10 maybe, but it's still not a
      * concern.
      */
-    private Double2ObjectRBTreeMap<DirectTriggerData> directTriggerSections = new Double2ObjectRBTreeMap<>();
+    private final Double2ObjectRBTreeMap<DirectTriggerData> directTriggerSections = new Double2ObjectRBTreeMap<>();
     private double accumulatedDistance = 0;
 
     /**
@@ -88,9 +87,9 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
         Vector3dc getSectionCenter() {
             if (this.sectionCenter == null) {
                 this.sectionCenter = new Vector3d(
-                        sectionPos.minBlockX() + 8,
-                        sectionPos.minBlockY() + 8,
-                        sectionPos.minBlockZ() + 8);
+                        this.sectionPos.minBlockX() + 8,
+                        this.sectionPos.minBlockY() + 8,
+                        this.sectionPos.minBlockZ() + 8);
             }
             return this.sectionCenter;
         }
@@ -111,16 +110,16 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
          * section.
          */
         double getSectionCenterTriggerCameraDist() {
-            return Math.sqrt(getSectionCenterDistSquared(this.triggerCameraPos));
+            return Math.sqrt(this.getSectionCenterDistSquared(this.triggerCameraPos));
         }
 
         double getSectionCenterDistSquared(Vector3dc vector) {
-            Vector3dc sectionCenter = getSectionCenter();
+            Vector3dc sectionCenter = this.getSectionCenter();
             return sectionCenter.distanceSquared(vector);
         }
 
         boolean isAngleTriggering(Vector3dc vector) {
-            return getSectionCenterDistSquared(vector) > SECTION_CENTER_DIST_SQUARED;
+            return this.getSectionCenterDistSquared(vector) > SECTION_CENTER_DIST_SQUARED;
         }
     }
 
@@ -131,13 +130,13 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
         return dot / (lengthA * lengthB);
     }
 
-    private void insertDirectAngleTrigger(DirectTriggerData data, Vector3dc cameraPos, double remainingAngle) {
+    private void insertDirectAngleTrigger(DirectTriggerData data, double remainingAngle) {
         double triggerCameraSectionCenterDist = data.getSectionCenterTriggerCameraDist();
         double centerMinDistance = Math.tan(remainingAngle) * (triggerCameraSectionCenterDist - SECTION_CENTER_DIST);
         this.insertTrigger(this.accumulatedDistance + centerMinDistance, data);
     }
 
-    private void insertDirectDistanceTrigger(DirectTriggerData data, Vector3dc cameraPos, double remainingDistance) {
+    private void insertDirectDistanceTrigger(DirectTriggerData data, double remainingDistance) {
         this.insertTrigger(this.accumulatedDistance + remainingDistance, data);
     }
 
@@ -185,7 +184,7 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
                 remainingAngle -= Math.acos(angleCos);
             }
 
-            this.insertDirectAngleTrigger(data, camera, remainingAngle);
+            this.insertDirectAngleTrigger(data, remainingAngle);
         } else {
             double remainingDistance = TRIGGER_DISTANCE;
             double lastTriggerCurrentCameraDistSquared = data.triggerCameraPos.distanceSquared(camera);
@@ -197,7 +196,7 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
                 remainingDistance -= Math.sqrt(lastTriggerCurrentCameraDistSquared);
             }
 
-            this.insertDirectDistanceTrigger(data, camera, remainingDistance);
+            this.insertDirectDistanceTrigger(data, remainingDistance);
         }
     }
 
@@ -212,7 +211,6 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
         }
     }
 
-    @Override
     public void integrateSection(SortTriggering ts, SectionPos sectionPos, DynamicTopoData data,
             CameraMovement movement) {
         // create data with last camera position
@@ -224,9 +222,9 @@ class DirectTriggers implements SectionTriggers<DynamicTopoData> {
             this.processSingleTrigger(newData, ts, movement.end());
         } else {
             if (newData.isAngleTriggering(cameraPos)) {
-                this.insertDirectAngleTrigger(newData, cameraPos, TRIGGER_ANGLE);
+                this.insertDirectAngleTrigger(newData, TRIGGER_ANGLE);
             } else {
-                this.insertDirectDistanceTrigger(newData, cameraPos, TRIGGER_DISTANCE);
+                this.insertDirectDistanceTrigger(newData, TRIGGER_DISTANCE);
             }
         }
     }

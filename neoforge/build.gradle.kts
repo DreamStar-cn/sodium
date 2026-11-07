@@ -1,7 +1,7 @@
 plugins {
     id("multiloader-platform")
 
-    id("net.neoforged.moddev") version("2.0.140")
+    id("net.neoforged.moddev") version("2.0.147")
 }
 
 base {
@@ -15,7 +15,7 @@ repositories {
     maven("https://maven.neoforged.net/releases/")
     maven {
         name = "Maven for PR #pr299pr28793" // https://github.com/neoforged/NeoForge/pull/2815
-        url = uri("https://prmaven.neoforged.net/NeoForge/pr2879")
+        url = uri("https://prmaven.neoforged.net/NeoForge/pr3403")
         content {
             includeModule("net.neoforged", "neoforge")
             includeModule("net.neoforged", "testframework")
@@ -47,16 +47,25 @@ val configurationCommonServiceResources: Configuration = configurations.create("
     isCanBeResolved = true
 }
 
+val configurationFrapiModJava: Configuration = configurations.create("frapiJava") {
+    isCanBeResolved = true
+}
+val configurationFrapiModResources: Configuration = configurations.create("frapiResources") {
+    isCanBeResolved = true
+}
+
 dependencies {
     configurationCommonModJava(project(path = ":common", configuration = "commonMainJava"))
     configurationCommonApiJava(project(path = ":common", configuration = "commonApiJava"))
     configurationCommonServiceJava(project(path = ":common", configuration = "commonBootJava"))
+    if (BuildConfig.SUPPORT_FRAPI) configurationFrapiModJava(project(path = ":frapi", configuration = "frapiMainJava"))
 
     configurationCommonApiSources(project(path = ":common", configuration = "commonApiSources"))
 
     configurationCommonModResources(project(path = ":common", configuration = "commonMainResources"))
     configurationCommonModResources(project(path = ":common", configuration = "commonApiResources"))
     configurationCommonServiceResources(project(path = ":common", configuration = "commonBootResources"))
+    if (BuildConfig.SUPPORT_FRAPI) configurationFrapiModResources(project(path = ":frapi", configuration = "frapiMainResources"))
 
     fun addEmbeddedFabricModule(dependency: String) {
         dependencies.implementation(dependency)
@@ -72,6 +81,10 @@ val modJar = tasks.register<Jar>("modJar") {
     from(configurationCommonModJava)
     from(configurationCommonApiJava)
     from(configurationCommonModResources)
+    if (BuildConfig.SUPPORT_FRAPI) {
+        from(configurationFrapiModJava)
+        from(configurationFrapiModResources)
+    }
 
     from(sourceSets["mod"].output)
 
@@ -136,13 +149,8 @@ sourceSets {
 
 neoForge {
     version = BuildConfig.NEOFORGE_VERSION
-
-    if (BuildConfig.PARCHMENT_VERSION != null) {
-        parchment {
-            minecraftVersion = BuildConfig.MINECRAFT_VERSION
-            mappingsVersion = BuildConfig.PARCHMENT_VERSION
-        }
-    }
+    accessTransformers.from(file("src/mod/resources/META-INF/accesstransformer.cfg"))
+    validateAccessTransformers = true
 
     runs {
         create("Client") {
@@ -156,6 +164,9 @@ neoForge {
             sourceSet(sourceSets["mod"])
             sourceSet(project(":common").sourceSets["main"])
             sourceSet(project(":common").sourceSets["api"])
+            if (BuildConfig.SUPPORT_FRAPI) {
+                sourceSet(project(":frapi").sourceSets["main"])
+            }
         }
 
         create("sodium-service") {
@@ -185,9 +196,6 @@ tasks {
     }
 
     getByName<ProcessResources>("processModResources") {
-        eachFile {
-            println(path)
-        }
         filesMatching(listOf("META-INF/neoforge.mods.toml")) {
             expand(mapOf("version" to BuildConfig.createVersionString(rootProject)))
         }

@@ -1,9 +1,8 @@
 package net.caffeinemc.mods.sodium.client.render.vertex.serializers.generated;
 
-import com.mojang.blaze3d.vertex.VertexFormat;
-import com.mojang.blaze3d.vertex.VertexFormatElement;
-import net.caffeinemc.mods.sodium.api.vertex.serializer.VertexSerializer;
+import com.mojang.renderpearl.api.vertex.VertexFormat;
 import net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics;
+import net.caffeinemc.mods.sodium.api.vertex.serializer.VertexSerializer;
 import org.objectweb.asm.*;
 
 import java.lang.invoke.MethodHandles;
@@ -170,27 +169,18 @@ public class VertexSerializerFactory {
     private static List<MemoryTransfer> createMemoryTransferList(VertexFormat srcVertexFormat, VertexFormat dstVertexFormat) {
         var ops = new ArrayList<MemoryTransfer>();
 
-        for (var elementIndex = 0; elementIndex < 32; elementIndex++) {
-            var elementType = VertexFormatElement.byId(elementIndex);
-
-            if (elementType == null) {
-                continue;
-            }
-
-            // Check if we need to transfer the element into the destination format
-            if (!dstVertexFormat.contains(elementType)) {
-                continue;
-            }
+        for (var elementIndex = 0; elementIndex < dstVertexFormat.getElements().size(); elementIndex++) {
+            var elementType = dstVertexFormat.getElements().get(elementIndex);
 
             // If the destination format has the element, then the source format needs to have it as well
-            if (!srcVertexFormat.contains(elementType)) {
+            if (!srcVertexFormat.contains(elementType.name())) {
                 throw new RuntimeException("Source format is missing element %s as required by destination format".formatted(elementType));
             }
 
-            var srcOffset = srcVertexFormat.getOffset(elementType);
-            var dstOffset = dstVertexFormat.getOffset(elementType);
+            var srcOffset = srcVertexFormat.getElement(elementType.name()).offset();
+            var dstOffset = elementType.offset();
 
-            ops.add(new MemoryTransfer(srcOffset, dstOffset, elementType.byteSize()));
+            ops.add(new MemoryTransfer(srcOffset, dstOffset, elementType.format().blockSize()));
         }
 
         return mergeAdjacentMemoryTransfers(ops);

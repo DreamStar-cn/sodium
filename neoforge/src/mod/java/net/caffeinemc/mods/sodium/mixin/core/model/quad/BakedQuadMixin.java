@@ -3,10 +3,9 @@ package net.caffeinemc.mods.sodium.mixin.core.model.quad;
 import net.caffeinemc.mods.sodium.client.model.quad.BakedQuadView;
 import net.caffeinemc.mods.sodium.client.model.quad.properties.ModelQuadFacing;
 import net.caffeinemc.mods.sodium.client.model.quad.properties.ModelQuadFlags;
-import net.caffeinemc.mods.sodium.client.util.ModelQuadUtil;
 import net.minecraft.client.model.geom.builders.UVPair;
-import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.core.Direction;
 import net.minecraft.util.LightCoordsUtil;
 import net.neoforged.neoforge.client.model.quad.BakedColors;
@@ -24,10 +23,10 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class BakedQuadMixin implements BakedQuadView {
 
     @Shadow
-    public abstract Vector3fc position(int i);
+    public abstract Vector3fc position(int vertex);
 
     @Shadow
-    public abstract long packedUV(int i);
+    public abstract long packedUV(int vertex);
 
     @Shadow
     @Final
@@ -41,105 +40,123 @@ public abstract class BakedQuadMixin implements BakedQuadView {
     @Shadow
     @Final
     private BakedQuad.MaterialInfo materialInfo;
-    @Unique
-    private int flags;
 
     @Unique
-    private int normal;
-
+    private int sodium$flags;
     @Unique
-    private ModelQuadFacing normalFace = null;
+    private int sodium$normal;
+    @Unique
+    private ModelQuadFacing sodium$normalFace = null;
 
-    @Inject(method = "<init>(Lorg/joml/Vector3fc;Lorg/joml/Vector3fc;Lorg/joml/Vector3fc;Lorg/joml/Vector3fc;JJJJLnet/minecraft/core/Direction;Lnet/minecraft/client/resources/model/geometry/BakedQuad$MaterialInfo;Lnet/neoforged/neoforge/client/model/quad/BakedNormals;Lnet/neoforged/neoforge/client/model/quad/BakedColors;)V", at = @At("RETURN"))
-    private void init(Vector3fc position0, Vector3fc position1, Vector3fc position2, Vector3fc position3, long packedUV0, long packedUV1, long packedUV2, long packedUV3, Direction direction, BakedQuad.MaterialInfo materialInfo, BakedNormals bakedNormals, BakedColors bakedColors, CallbackInfo ci) {
-        this.normal = this.calculateNormal();
-        this.normalFace = ModelQuadFacing.fromPackedNormal(this.normal);
+    @Inject(method = "<init>(Lorg/joml/Vector3fc;Lorg/joml/Vector3fc;Lorg/joml/Vector3fc;Lorg/joml/Vector3fc;JJJJLnet/minecraft/core/Direction;Lnet/minecraft/client/resources/model/geometry/BakedQuad$MaterialInfo;Lnet/neoforged/neoforge/client/model/quad/BakedNormals;Lnet/neoforged/neoforge/client/model/quad/BakedColors;)V",
+            at = @At("RETURN"))
+    private void init(Vector3fc position0,
+                      Vector3fc position1,
+                      Vector3fc position2,
+                      Vector3fc position3,
+                      long packedUV0,
+                      long packedUV1,
+                      long packedUV2,
+                      long packedUV3,
+                      Direction direction,
+                      BakedQuad.MaterialInfo materialInfo,
+                      BakedNormals bakedNormals,
+                      BakedColors bakedColors,
+                      CallbackInfo ci) {
+        this.sodium$normal = this.sodium$calculateNormal();
+        this.sodium$normalFace = ModelQuadFacing.fromPackedNormal(this.sodium$normal);
 
-        this.flags = ModelQuadFlags.getQuadFlags(this, direction);
+        this.sodium$flags = ModelQuadFlags.getQuadFlags(this, direction);
     }
 
     @Override
-    public float getX(int idx) {
+    public float sodium$getX(int idx) {
         return this.position(idx).x();
     }
 
     @Override
-    public float getY(int idx) {
+    public float sodium$getY(int idx) {
         return this.position(idx).y();
     }
 
     @Override
-    public float getZ(int idx) {
+    public float sodium$getZ(int idx) {
         return this.position(idx).z();
     }
 
     @Override
-    public int getColor(int idx) {
+    public int sodium$getColor(int idx) {
         return this.bakedColors.color(idx); // default is -1 for now
     }
 
     @Override
-    public int getVertexNormal(int idx) {
-        return this.bakedNormals == BakedNormals.UNSPECIFIED ? -1 : this.bakedNormals.normal(idx);//this.vertices[ModelQuadUtil.vertexOffset(idx) + ModelQuadUtil.NORMAL_INDEX];
+    public int sodium$getVertexNormal(int idx) {
+        //this.vertices[ModelQuadUtil.vertexOffset(idx) + ModelQuadUtil.NORMAL_INDEX];
+        return this.bakedNormals == BakedNormals.UNSPECIFIED ? 0 : this.bakedNormals.normal(idx);
     }
 
     @Override
-    public int getLight(int idx) {
+    public int sodium$getLight(int idx) {
         return 0;//this.vertices[ModelQuadUtil.vertexOffset(idx) + ModelQuadUtil.LIGHT_INDEX];
     }
 
     @Override
-    public TextureAtlasSprite getSprite() {
+    public TextureAtlasSprite sodium$getSprite() {
         return this.materialInfo.sprite();
     }
 
     @Override
-    public float getTexU(int idx) {
+    public float sodium$getTexU(int idx) {
         return UVPair.unpackU(this.packedUV(idx));
     }
 
     @Override
-    public float getTexV(int idx) {
+    public float sodium$getTexV(int idx) {
         return UVPair.unpackV(this.packedUV(idx));
     }
 
     @Override
-    public int getFlags() {
-        return this.flags;
+    public int sodium$getFlags() {
+        return this.sodium$flags;
     }
 
     @Override
-    public int getTintIndex() {
+    public int sodium$getTintIndex() {
         return this.materialInfo.tintIndex();
     }
 
     @Override
-    public ModelQuadFacing getNormalFace() {
-        return this.normalFace;
+    public ModelQuadFacing sodium$getNormalFace() {
+        return this.sodium$normalFace;
     }
 
     @Override
-    public int getFaceNormal() {
-        return this.normal;
+    public int sodium$getFaceNormal() {
+        return this.sodium$normal;
     }
 
     @Override
-    public Direction getLightFace() {
+    public Direction sodium$getLightFace() {
         return this.direction;
     }
 
     @Override
-    public int getMaxLightQuad(int idx) {
-        return LightCoordsUtil.lightCoordsWithEmission(getLight(idx), this.materialInfo.lightEmission());
+    public int sodium$getMaxLightQuad(int idx) {
+        return LightCoordsUtil.lightCoordsWithEmission(this.sodium$getLight(idx), this.materialInfo.lightEmission());
     }
 
     @Override
-    public boolean hasShade() {
-        return this.materialInfo.shade();
+    public int sodium$getLightEmission() {
+        return this.materialInfo.lightEmission();
     }
 
     @Override
-    public boolean hasAO() {
+    public boolean sodium$hasShade() {
+        return true;
+    }
+
+    @Override
+    public boolean sodium$hasAO() {
         return this.materialInfo.ambientOcclusion();
     }
 }

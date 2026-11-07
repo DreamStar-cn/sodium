@@ -3,6 +3,7 @@ package net.caffeinemc.mods.sodium.client.platform.windows.api;
 import org.jspecify.annotations.Nullable;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.*;
+
 import java.nio.ByteBuffer;
 
 public class Kernel32 {
@@ -82,12 +83,10 @@ public class Kernel32 {
             if (result == 0) {
                 var error = getLastError();
 
-                switch (error) {
-                    case 126 /* ERROR_MOD_NOT_FOUND */:
-                        return MemoryUtil.NULL;
-                    default:
-                        throw new RuntimeException("GetModuleHandleEx failed, error=" + error);
+                if (error == 126) { /* ERROR_MOD_NOT_FOUND */
+                    return MemoryUtil.NULL;
                 }
+                throw new RuntimeException("GetModuleHandleEx failed, error=" + error);
             }
 
             return phModule.get(0);
@@ -95,10 +94,10 @@ public class Kernel32 {
     }
 
     public static String getModuleFileName(long phModule) {
-        ByteBuffer lpFileName = MemoryUtil.memAlignedAlloc(16, MAX_PATH);
+        ByteBuffer lpFileName = MemoryUtil.memAlignedAlloc(16, MAX_PATH * Character.BYTES);
 
         try {
-            int length = JNI.callPPI(phModule, MemoryUtil.memAddress(lpFileName), lpFileName.capacity(), PFN_GetModuleFileNameW);
+            int length = JNI.callPPI(phModule, MemoryUtil.memAddress(lpFileName), lpFileName.capacity() / Character.BYTES, PFN_GetModuleFileNameW);
 
             if (length == 0) {
                 throw new RuntimeException("GetModuleFileNameW failed, error=" + getLastError());

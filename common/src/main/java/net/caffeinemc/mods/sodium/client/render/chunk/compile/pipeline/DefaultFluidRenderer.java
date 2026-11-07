@@ -1,6 +1,7 @@
 package net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline;
 
-
+import com.google.common.base.Suppliers;
+import it.unimi.dsi.fastutil.doubles.DoubleList;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import net.caffeinemc.mods.sodium.api.util.ColorARGB;
@@ -23,9 +24,11 @@ import net.caffeinemc.mods.sodium.client.render.chunk.vertex.format.ChunkVertexE
 import net.caffeinemc.mods.sodium.client.services.PlatformBlockAccess;
 import net.caffeinemc.mods.sodium.client.util.DirectionUtil;
 import net.caffeinemc.mods.sodium.client.world.LevelSlice;
+import net.caffeinemc.mods.sodium.mixin.core.world.VoxelShapeAccessor;
 import net.minecraft.client.renderer.block.BlockAndTintGetter;
 import net.minecraft.client.renderer.block.FluidModel;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.core.AxisCycle;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.tags.FluidTags;
@@ -35,8 +38,11 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.DiscreteVoxelShape;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+
+import java.util.function.Supplier;
 
 /**
  * The default fluid renderer implementation generates fluid geometry for each fluid block based on its fluid state, the block state, and other blocks around it.
@@ -70,11 +76,12 @@ public class DefaultFluidRenderer {
     private final IntList stack = new IntArrayList();
     private long visited = 0;
 
-    private final ShapeComparisonCache occlusionCache = new ShapeComparisonCache();
+    private final Supplier<ShapeComparisonCache> occlusionCache = Suppliers.memoize(ShapeComparisonCache::new);
 
     private final ModelQuadViewMutable quad = new ModelQuad();
 
-    private final LightPipelineProvider lighters;
+    private final LightPipeline smoothLighter;
+    private final LightPipeline flatLighter;
 
     private final QuadLightData quadLightData = new QuadLightData();
     private final int[] quadColors = new int[4];
@@ -84,7 +91,8 @@ public class DefaultFluidRenderer {
 
     public DefaultFluidRenderer(LightPipelineProvider lighters) {
         this.quad.setLightFace(Direction.UP);
-        this.lighters = lighters;
+        this.smoothLighter = lighters.getLighter(LightMode.SMOOTH);
+        this.flatLighter = lighters.getFlatFluidLighter();
 
         this.hiddenFluidCulling = SodiumClientMod.options().quality.hiddenFluidCulling;
         this.improvedFluidShaping = SodiumClientMod.options().quality.improvedFluidShaping;
@@ -108,7 +116,7 @@ public class DefaultFluidRenderer {
             return false;
         }
 
-        // don't render anything if the other blocks is the same fluid
+        // don't render anything if the other block is the same fluid
         // NOTE: this check is already included in the default implementation of the above shouldOccludeFluid
         if (otherState.getFluidState().getType().isSame(fluid.getType())) {
             return false;
@@ -137,51 +145,122 @@ public class DefaultFluidRenderer {
     }
 
     /**
-     * Checks if a face of the fluid is self-visible and not occluded by the block it's contained in.
+     * Checks if a face of the fluid is self-visible and not occluded by the block it's contained in. This method assumes the fluid face is a full block's face and aligned to the outside face of the block.
      *
      * @param selfBlockState The state of the block in the level
      * @param facing         The facing direction of the side to check
-     * @param fluidShape     The shape of the fluid
      * @return True if the fluid side facing {@param facing} is self-visible, otherwise false
      */
-    private boolean isFluidSelfVisible(BlockState selfBlockState, Direction facing, VoxelShape fluidShape) {
+    private boolean isFullBlockFluidSelfVisible(BlockState selfBlockState, Direction facing) {
         // only perform self-occlusion if the own block state can't occlude
         if (selfBlockState.canOcclude()) {
             var selfShape = selfBlockState.getFaceOcclusionShape(facing);
 
             // only a non-empty self-shape can occlude anything
             if (!ShapeComparisonCache.isEmptyShape(selfShape)) {
-                // a full self-shape occludes everything
-                if (ShapeComparisonCache.isFullShape(selfShape) && ShapeComparisonCache.isFullShape(fluidShape)) {
+                // a full block self-shape occludes everything
+                if (ShapeComparisonCache.isFullShape(selfShape)) {
                     return false;
                 }
 
                 // perform occlusion of the fluid by the block it's contained in
-                return this.occlusionCache.lookup(fluidShape, selfShape);
+                return this.occlusionCache.get().lookup(Shapes.block(), selfShape);
             }
         }
 
         return true;
     }
 
-    private boolean isFullBlockFluidSelfVisible(BlockState blockState, Direction dir) {
-        return this.isFluidSelfVisible(blockState, dir, Shapes.block());
+    /**
+     * Checks if a face of the fluid is self-visible and not occluded by the block it's contained in. This method assumes the fluid is defined by a full-block shape with an offset range. The face is only hidden if the block's occlusion shape completely covers the fluid in every layer it may occupy.
+     *
+     * @param selfBlockState The state of the block in the level
+     * @param facing The facing direction of the side to check
+     * @param minThickness The smallest distance of the face from the opposite face of the block
+     * @param maxThickness The largest distance of the face from the opposite face of the block
+     * @return True if the fluid side facing {@param facing} is self-visible, otherwise false
+     */
+    private boolean isSliceFluidSelfVisible(BlockState selfBlockState, Direction facing, float minThickness, float maxThickness) {
+        if (!selfBlockState.canOcclude()) {
+            return true;
+        }
+
+        // the fluid face is flush with the block's face, so the precomputed face shape applies
+        if (minThickness >= 1.0f) {
+            return this.isFullBlockFluidSelfVisible(selfBlockState, facing);
+        }
+
+        var selfShape = selfBlockState.getOcclusionShape();
+
+        Direction.Axis axis = facing.getAxis();
+        boolean positive = facing.getAxisDirection() == Direction.AxisDirection.POSITIVE;
+        double minOffset = positive ? minThickness : 1.0f - maxThickness;
+        double maxOffset = positive ? maxThickness : 1.0f - minThickness;
+
+        // a face exactly on the block's outer face belongs to the outermost layer
+        var accessor = (VoxelShapeAccessor) selfShape;
+        int firstIndex = accessor.sodium$findIndex(axis, minOffset);
+        int lastIndex = accessor.sodium$findIndex(axis, Math.min(maxOffset, 0.9999999));
+
+        return !isLayerRangeFull(selfShape, accessor.sodium$getShape(), axis, firstIndex, lastIndex);
     }
 
-    private boolean isFluidSideExposed(BlockAndTintGetter world, BlockState ownBlockState, BlockPos neighborPos, Direction facing, float height) {
-        return this.isFluidSideExposed(ownBlockState, world.getBlockState(neighborPos), facing, height);
+    /**
+     * Checks if the shape completely covers the block in every layer from {@code firstLayer} to {@code lastLayer} (inclusive) along the axis. Joining SliceShapes is slower than scanning the shape's voxel grid directly like this.
+     */
+    private static boolean isLayerRangeFull(VoxelShape shape, DiscreteVoxelShape grid, Direction.Axis axis, int firstLayer, int lastLayer) {
+        // layers outside the shape's extent are empty
+        if (firstLayer < 0 || lastLayer >= grid.getSize(axis)) {
+            return false;
+        }
+
+        Direction.Axis axisB = AxisCycle.FORWARD.cycle(axis);
+        Direction.Axis axisC = AxisCycle.BACKWARD.cycle(axis);
+
+        // a shape that doesn't reach the block's edges can't cover it
+        if (isShapeNonBlockSpanning(shape.getCoords(axisB)) || isShapeNonBlockSpanning(shape.getCoords(axisC))) {
+            return false;
+        }
+
+        var transform = AxisCycle.between(Direction.Axis.X, axis);
+        for (int layer = firstLayer; layer <= lastLayer; layer++) {
+            if (!isLayerFull(grid, transform, layer, grid.getSize(axisB), grid.getSize(axisC))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean isLayerFull(DiscreteVoxelShape grid, AxisCycle transform, int layer, int sizeB, int sizeC) {
+        for (int b = 0; b < sizeB; b++) {
+            for (int c = 0; c < sizeC; c++) {
+                if (!grid.isFull(transform, layer, b, c)) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean isShapeNonBlockSpanning(DoubleList coords) {
+        return !(coords.getDouble(0) <= Shapes.EPSILON) || !(coords.getDouble(coords.size() - 1) >= 1.0 - Shapes.EPSILON);
     }
 
     /**
      * Checks if a face of a fluid block with a specific height should be rendered based on the neighboring block state.
      *
-     * @param ownBlockState      The state of the block in the level
-     * @param neighborBlockState The state of the neighboring block in the level
-     * @param facing             The facing direction of the side to check
-     * @param height             The height of the fluid
+     * @param world         The block view for this render context
+     * @param ownBlockState The state of the block in the level
+     * @param neighborPos   The position of the neighboring block
+     * @param facing        The facing direction of the side to check
+     * @param height        The height of the fluid
      * @return True if the fluid side facing {@param facing} is not occluded, otherwise false
      */
-    private boolean isFluidSideExposed(BlockState ownBlockState, BlockState neighborBlockState, Direction facing, float height) {
+    private boolean isFluidSideExposed(BlockAndTintGetter world, BlockState ownBlockState, BlockPos neighborPos, Direction facing, float height) {
+        BlockState neighborBlockState = world.getBlockState(neighborPos);
+
         // zero-height fluids don't render anything anyway
         if (height <= 0.0F) {
             return false;
@@ -217,18 +296,11 @@ public class DefaultFluidRenderer {
         }
 
         var ownShape = ownBlockState.getFaceOcclusionShape(facing);
-        return this.occlusionCache.lookup(fluidShape, neighborShape, ownShape);
+        return this.occlusionCache.get().lookup(fluidShape, neighborShape, ownShape);
     }
 
     private boolean isSideExposedOffset(BlockAndTintGetter world, BlockState ownBlockState, BlockPos originPos, Direction dir, float height) {
         return this.isFluidSideExposed(world, ownBlockState, this.scratchPos.setWithOffset(originPos, dir), dir, height);
-    }
-
-    /**
-     * Calculates the combined visibility of a fluid face based on the neighboring block states and the fluid state.
-     */
-    private boolean isFullBlockFluidVisible(BlockAndTintGetter world, BlockPos pos, Direction dir, BlockState blockState, FluidState fluid) {
-        return isFullBlockFluidSelfVisible(blockState, dir) && this.isFullBlockFluidSideVisible(world, pos, dir, fluid);
     }
 
     /**
@@ -292,17 +364,22 @@ public class DefaultFluidRenderer {
      * @return The calculated corner height
      */
     private float fluidCornerHeight(BlockAndTintGetter world, BlockPos origin, Fluid fluid, float fluidHeight, Direction dirA, Direction dirB, float fluidHeightA, float fluidHeightB, boolean exposedA, boolean exposedB) {
-        float filteredHeightA = exposedA ? fluidHeightA : DISCARD_SAMPLE;
-        float filteredHeightB = exposedB ? fluidHeightB : DISCARD_SAMPLE;
-        if (filteredHeightA >= 1.0f || filteredHeightB >= 1.0f) {
-            return 1.0f;
-        }
-
         float cornerHeight;
         if (this.improvedFluidShaping) {
-            cornerHeight = sampleFluidCornerSmart(world, origin, fluid, dirA, dirB, fluidHeightA, fluidHeightB, exposedA, exposedB, filteredHeightA, filteredHeightB);
+            float filteredHeightA = exposedA ? fluidHeightA : DISCARD_SAMPLE;
+            float filteredHeightB = exposedB ? fluidHeightB : DISCARD_SAMPLE;
+
+            if (filteredHeightA >= 1.0f || filteredHeightB >= 1.0f) {
+                return 1.0f;
+            }
+
+            cornerHeight = this.sampleFluidCornerSmart(world, origin, fluid, dirA, dirB, fluidHeightA, fluidHeightB, exposedA, exposedB, filteredHeightA, filteredHeightB);
         } else {
-            cornerHeight = sampleFluidCornerBasic(world, origin, fluid, dirA, dirB, fluidHeightA, fluidHeightB, filteredHeightA, filteredHeightB);
+            if (fluidHeightA >= 1.0f || fluidHeightB >= 1.0f) {
+                return 1.0f;
+            }
+
+            cornerHeight = this.sampleFluidCornerBasic(world, origin, fluid, dirA, dirB, fluidHeightA, fluidHeightB);
         }
         if (cornerHeight >= 1.0f) {
             return 1.0f;
@@ -362,9 +439,9 @@ public class DefaultFluidRenderer {
         return Float.NaN;
     }
 
-    private float sampleFluidCornerBasic(BlockAndTintGetter world, BlockPos origin, Fluid fluid, Direction dirA, Direction dirB, float fluidHeightA, float fluidHeightB, float filteredHeightA, float filteredHeightB) {
+    private float sampleFluidCornerBasic(BlockAndTintGetter world, BlockPos origin, Fluid fluid, Direction dirA, Direction dirB, float fluidHeightA, float fluidHeightB) {
         // if there is any fluid on either side, check if the diagonal has any
-        if (filteredHeightA > 0.0f || filteredHeightB > 0.0f) {
+        if (fluidHeightA > 0.0f || fluidHeightB > 0.0f) {
             BlockPos abNeighbor = this.scratchPos.set(origin).move(dirA).move(dirB);
             float height = this.sampleFluidHeight(world, fluid, abNeighbor);
 
@@ -384,8 +461,9 @@ public class DefaultFluidRenderer {
     public void render(LevelSlice level, BlockState blockState, FluidState fluidState, BlockPos blockPos, BlockPos offset, TranslucentGeometryCollector collector, ChunkModelBuilder meshBuilder, Material material, ColorProvider<FluidState> colorProvider, FluidModel sprites) {
         Fluid fluid = fluidState.getType();
 
-        boolean upVisible = this.isFullBlockFluidVisible(level, blockPos, Direction.UP, blockState, fluidState);
-        boolean downVisible = this.isFullBlockFluidVisible(level, blockPos, Direction.DOWN, blockState, fluidState) &&
+        boolean upVisible = this.isFullBlockFluidSideVisible(level, blockPos, Direction.UP, fluidState);
+        boolean downVisible = this.isFullBlockFluidSelfVisible(blockState, Direction.DOWN) &&
+                this.isFullBlockFluidSideVisible(level, blockPos, Direction.DOWN, fluidState) &&
                 this.isSideExposedOffset(level, blockState, blockPos, Direction.DOWN, FULL_HEIGHT);
 
         // self-visibility and visibility are kept separate because self-visibility is used by the corner height sampling
@@ -401,7 +479,8 @@ public class DefaultFluidRenderer {
         boolean eastVisible = eastSelfVisible && this.isFullBlockFluidSideVisible(level, blockPos, Direction.EAST, fluidState);
 
         // stop rendering if all faces of the fluid are occluded
-        if (!upVisible && !downVisible && !eastVisible && !westVisible && !northVisible && !southVisible) {
+        boolean allButUpInvisible = !downVisible && !eastVisible && !westVisible && !northVisible && !southVisible;
+        if (!upVisible && allButUpInvisible) {
             return;
         }
 
@@ -437,25 +516,36 @@ public class DefaultFluidRenderer {
             westVisible &= westExposed;
             eastVisible &= eastExposed;
         }
+
+        float minHeight = Math.min(Math.min(northWestHeight, southWestHeight), Math.min(southEastHeight, northEastHeight));
+        float maxHeight = Math.max(Math.max(northWestHeight, southWestHeight), Math.max(southEastHeight, northEastHeight));
+
+        // with the corner heights, we can perform correct culling for the top face since it might be offset from the top of the block, and thus simply looking at occlusion faces isn't accurate.
+        if (upVisible && !this.isSliceFluidSelfVisible(blockState, Direction.UP, minHeight, maxHeight)) {
+            upVisible = false;
+
+            if (!downVisible && !eastVisible && !westVisible && !northVisible && !southVisible) {
+                return;
+            }
+        }
+
         float yOffset = !downVisible ? 0.0F : EPSILON;
 
         final ModelQuadViewMutable quad = this.quad;
 
-        LightMode lightMode = isWater && level.useAmbientOcclusion() ? LightMode.SMOOTH : LightMode.FLAT;
-        LightPipeline lighter = this.lighters.getLighter(lightMode);
+        LightPipeline lighter = isWater && level.useAmbientOcclusion() ? this.smoothLighter : this.flatLighter;
 
         quad.setFlags(0);
 
         // calculate up fluid face exposure
         if (upVisible) {
-            float totalMinHeight = Math.min(Math.min(northWestHeight, southWestHeight), Math.min(southEastHeight, northEastHeight));
-            upVisible = this.isSideExposedOffset(level, blockState, blockPos, Direction.UP, totalMinHeight);
+            upVisible = this.isSideExposedOffset(level, blockState, blockPos, Direction.UP, minHeight);
         }
 
         // apply heuristic to not render up face it's in a flooded cave
         boolean inwardsUpFaceVisible = true;
         if (upVisible && fluidState.isSource()) {
-            var exposureResult = getUpFaceExposureByNeighbors(level, blockPos, fluidState);
+            var exposureResult = this.getUpFaceExposureByNeighbors(level, blockPos, fluidState);
             if (this.hiddenFluidCulling) {
                 upVisible = exposureResult != NO_EXPOSURE;
             }
@@ -691,7 +781,7 @@ public class DefaultFluidRenderer {
         this.stack.clear();
 
         var result = 0;
-        result |= visitExposureNeighbor(level, origin, fluidState, 0, 0);
+        result |= this.visitExposureNeighbor(level, origin, fluidState, 0, 0);
         if (result == BOTH_EXPOSED) {
             return result;
         }
@@ -703,25 +793,25 @@ public class DefaultFluidRenderer {
 
             // traverse into unvisited neighbors, return immediately if both faces are exposed (no further change possible)
             if (x < radius) {
-                result |= visitExposureNeighbor(level, origin, fluidState, x + 1, z);
+                result |= this.visitExposureNeighbor(level, origin, fluidState, x + 1, z);
                 if (result == BOTH_EXPOSED) {
                     return result;
                 }
             }
             if (x > -radius) {
-                result |= visitExposureNeighbor(level, origin, fluidState, x - 1, z);
+                result |= this.visitExposureNeighbor(level, origin, fluidState, x - 1, z);
                 if (result == BOTH_EXPOSED) {
                     return result;
                 }
             }
             if (z < radius) {
-                result |= visitExposureNeighbor(level, origin, fluidState, x, z + 1);
+                result |= this.visitExposureNeighbor(level, origin, fluidState, x, z + 1);
                 if (result == BOTH_EXPOSED) {
                     return result;
                 }
             }
             if (z > -radius) {
-                result |= visitExposureNeighbor(level, origin, fluidState, x, z - 1);
+                result |= this.visitExposureNeighbor(level, origin, fluidState, x, z - 1);
                 if (result == BOTH_EXPOSED) {
                     return result;
                 }
@@ -737,7 +827,7 @@ public class DefaultFluidRenderer {
 
     private int visitExposureNeighbor(BlockAndTintGetter level, BlockPos origin, FluidState fluidState, int xOffset, int zOffset) {
         // stop if position was already visited previously
-        var upNeighborMask = offsetToMask(xOffset, zOffset);
+        var upNeighborMask = this.offsetToMask(xOffset, zOffset);
         if ((this.visited & upNeighborMask) != 0) {
             return NO_EXPOSURE;
         }
@@ -794,14 +884,14 @@ public class DefaultFluidRenderer {
         if (facing.isAligned()) {
             normal = facing.getPackedAlignedNormal();
         } else {
-            normal = quad.calculateNormal();
+            normal = quad.sodium$calculateNormal();
         }
 
         quad.setFaceNormal(normal);
 
         QuadLightData light = this.quadLightData;
 
-        lighter.calculate(quad, pos, light, null, dir, false, false);
+        lighter.calculate(quad, pos, light, null, dir, Direction.UP, false);
 
         colorProvider.getColors(level, pos, this.scratchPos, fluidState, quad, this.quadColors, level.hasBiomeBlend());
 
@@ -819,18 +909,18 @@ public class DefaultFluidRenderer {
 
         for (int i = 0; i < 4; i++) {
             var out = vertices[flip ? (3 - i + 1) & 0b11 : i];
-            out.x = offset.getX() + quad.getX(i);
-            out.y = offset.getY() + quad.getY(i);
-            out.z = offset.getZ() + quad.getZ(i);
+            out.x = offset.getX() + quad.sodium$getX(i);
+            out.y = offset.getY() + quad.sodium$getY(i);
+            out.z = offset.getZ() + quad.sodium$getZ(i);
 
             out.color = this.quadColors[i];
             out.ao = this.brightness[i];
-            out.u = quad.getTexU(i);
-            out.v = quad.getTexV(i);
+            out.u = quad.sodium$getTexU(i);
+            out.v = quad.sodium$getTexV(i);
             out.light = this.quadLightData.lm[i];
         }
 
-        TextureAtlasSprite sprite = quad.getSprite();
+        TextureAtlasSprite sprite = quad.sodium$getSprite();
 
         if (sprite != null) {
             builder.addSprite(sprite);
@@ -843,7 +933,7 @@ public class DefaultFluidRenderer {
                 normal = facing.getPackedAlignedNormal();
             } else {
                 // This was updated earlier in updateQuad. There is no situation where the normal vector should have changed.
-                normal = quad.getFaceNormal();
+                normal = quad.sodium$getFaceNormal();
             }
 
             if (flip) {

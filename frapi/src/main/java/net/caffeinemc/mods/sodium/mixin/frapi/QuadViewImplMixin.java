@@ -12,8 +12,8 @@ public class QuadViewImplMixin implements ExtendedQuadViewImpl {
     private QuadViewWrapper wrapper;
 
     @Override
-    public QuadViewWrapper getWrapper() {
-        if (wrapper == null) wrapper = new QuadViewWrapper((QuadViewImpl) (Object) this);
-        return wrapper;
+    public QuadViewWrapper sodium$getWrapper() {
+        if (this.wrapper == null) this.wrapper = new QuadViewWrapper((QuadViewImpl) (Object) this);
+        return this.wrapper;
     }
 }

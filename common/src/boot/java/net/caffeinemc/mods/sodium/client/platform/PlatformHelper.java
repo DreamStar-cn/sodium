@@ -1,7 +1,8 @@
 package net.caffeinemc.mods.sodium.client.platform;
 
+import net.caffeinemc.mods.sodium.client.compatibility.environment.OsUtils;
+import net.caffeinemc.mods.sodium.client.platform.windows.api.Imm32;
 import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -9,7 +10,7 @@ public class PlatformHelper {
     private static final Logger LOGGER = LoggerFactory.getLogger("Sodium-EarlyDriverScanner");
 
     public static void showCriticalErrorAndClose(
-            @Nullable NativeWindowHandle window,
+            long pWindow,
             @NonNull String messageTitle,
             @NonNull String messageBody,
             @NonNull String helpUrl)
@@ -22,8 +23,17 @@ public class PlatformHelper {
                 .replace("###ERROR_DESCRIPTION###", messageBody)
                 .replace("###HELP_URL###", helpUrl));
 
-        // Try to show a graphical message box (if the platform supports it) and shut down the game.
-        MessageBox.showMessageBox(window, MessageBox.IconType.ERROR, messageTitle, messageBody, helpUrl);
+        // Try to show a graphical message box and shut down the game.
+        MessageBox.showMessageBox(pWindow, MessageBox.IconType.ERROR, messageTitle, messageBody, helpUrl);
         System.exit(1 /* failure code */);
+    }
+
+    public static boolean isUsingIME() {
+        if (OsUtils.getOs() == OsUtils.OperatingSystem.WIN) {
+            return Imm32.checkIMEStatus();
+        }
+
+        // Not handled on other platforms, so just assume we are not using an IME.
+        return false;
     }
 }

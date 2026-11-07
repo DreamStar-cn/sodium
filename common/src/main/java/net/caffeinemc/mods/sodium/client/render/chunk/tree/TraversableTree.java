@@ -39,6 +39,32 @@ public class TraversableTree extends Tree {
         this.treeDoubleReduced = doubleReduced;
     }
 
+    /**
+     * Adds a section to the tree and immediately prepares it for traversal without needing to re-prepare the whole tree.
+     *
+     * @param x x coordinate
+     * @param y y coordinate
+     * @param z z coordinate
+     */
+    public int addPatch(int x, int y, int z) {
+        x -= this.offsetX;
+        y -= this.offsetY;
+        z -= this.offsetZ;
+        if (Tree.isOutOfBounds(x, y, z)) {
+            return OUT_OF_BOUNDS;
+        }
+
+        var bitIndex = Tree.interleave6x3(x, y, z);
+        int entryIndex = bitIndex >> 6;
+        var entry = this.tree[entryIndex];
+        var newEntry = entry | (1L << (bitIndex & 0b111111));
+        this.tree[entryIndex] = newEntry;
+        this.treeReduced[bitIndex >> 12] |= 1L << (entryIndex & 0b111111);
+        this.treeDoubleReduced |= 1L << (bitIndex >> 18);
+
+        return (entry == newEntry) ? PRESENT : NOT_PRESENT;
+    }
+
     @Override
     public int getPresence(int x, int y, int z) {
         x -= this.offsetX;
@@ -72,7 +98,7 @@ public class TraversableTree extends Tree {
 
         // everything is already inside the distance limit if the build distance is smaller
         var initialInside = this.distanceLimit >= buildDistance ? INSIDE_DISTANCE : 0;
-        this.traverse(getChildOrderModulator(0, 0, 0, 1 << 5), 0, 5, initialInside);
+        this.traverse(this.getChildOrderModulator(0, 0, 0, 1 << 5), 0, 5, initialInside);
 
         this.visitor = null;
         this.viewport = null;
@@ -104,7 +130,7 @@ public class TraversableTree extends Tree {
                         int y = deinterleave6(sectionOrigin >> 1) + this.offsetY;
                         int z = deinterleave6(sectionOrigin >> 2) + this.offsetZ;
 
-                        if (inside == FULLY_INSIDE || testLeafNode(x, y, z, inside)) {
+                        if (inside == FULLY_INSIDE || this.testLeafNode(x, y, z, inside)) {
                             this.visitor.visit(x, y, z);
                         }
                     }
@@ -170,7 +196,7 @@ public class TraversableTree extends Tree {
         // immediately traverse if fully inside
         if (inside == FULLY_INSIDE) {
             level--;
-            this.traverse(getChildOrderModulator(x, y, z, 1 << level), childOrigin, level, inside);
+            this.traverse(this.getChildOrderModulator(x, y, z, 1 << level), childOrigin, level, inside);
             return;
         }
 
@@ -218,7 +244,7 @@ public class TraversableTree extends Tree {
 
         if (visible) {
             level--;
-            this.traverse(getChildOrderModulator(x, y, z, 1 << level), childOrigin, level, inside);
+            this.traverse(this.getChildOrderModulator(x, y, z, 1 << level), childOrigin, level, inside);
         }
     }
 

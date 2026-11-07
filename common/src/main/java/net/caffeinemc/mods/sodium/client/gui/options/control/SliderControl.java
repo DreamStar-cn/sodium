@@ -1,8 +1,8 @@
 package net.caffeinemc.mods.sodium.client.gui.options.control;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.cursor.CursorTypes;
 import net.caffeinemc.mods.sodium.client.config.structure.IntegerOption;
-import net.caffeinemc.mods.sodium.client.config.structure.Option;
 import net.caffeinemc.mods.sodium.client.config.structure.StatefulOption;
 import net.caffeinemc.mods.sodium.client.gui.ColorTheme;
 import net.caffeinemc.mods.sodium.client.gui.Colors;
@@ -36,7 +36,7 @@ public class SliderControl implements Control {
         throw new UnsupportedOperationException("Not implemented");
     }
 
-    static class SliderControlElement extends ControlElement {
+    static class SliderControlElement extends StatefulControlElement {
         private static final int THUMB_WIDTH = 2, TRACK_HEIGHT = 1;
 
         private final IntegerOption option;
@@ -55,7 +55,7 @@ public class SliderControl implements Control {
         }
 
         @Override
-        public Option getOption() {
+        public IntegerOption getOption() {
             return this.option;
         }
 
@@ -63,8 +63,8 @@ public class SliderControl implements Control {
         public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
             int sliderX = this.getSliderX();
             int sliderY = this.getSliderY();
-            int sliderWidth = this.getSliderWidth();
-            int sliderHeight = this.getSliderHeight();
+            int sliderWidth = Layout.SLIDER_WIDTH;
+            int sliderHeight = Layout.SLIDER_HEIGHT;
 
             var value = this.option.getValidatedValue();
             var isEnabled = this.option.isEnabled();
@@ -77,18 +77,18 @@ public class SliderControl implements Control {
 
             int labelWidth = this.font.width(label);
 
+            // render the label first and then the slider to prevent the highlight rect from darkening the slider
+            super.extractRenderState(graphics, mouseX, mouseY, delta);
+
+            if (this.option.shouldHideControl() || this.isResetOverlayActive()) {
+                return;
+            }
+
             boolean drawSlider = isEnabled && (this.hovered || this.isFocused());
             if (drawSlider) {
                 this.contentWidth = sliderWidth + labelWidth;
             } else {
                 this.contentWidth = labelWidth;
-            }
-
-            // render the label first and then the slider to prevent the highlight rect from darkening the slider
-            super.extractRenderState(graphics, mouseX, mouseY, delta);
-
-            if (!this.option.showControl()) {
-                return;
             }
 
             if (drawSlider) {
@@ -100,7 +100,7 @@ public class SliderControl implements Control {
                 this.drawRect(graphics, sliderX, trackY, sliderX + sliderWidth, trackY + TRACK_HEIGHT, this.theme.themeLighter);
                 this.drawRect(graphics, thumbX, sliderY, thumbX + (THUMB_WIDTH * 2), sliderY + sliderHeight, Colors.FOREGROUND);
 
-                this.drawString(graphics, label, sliderX - labelWidth - 6, sliderY + (sliderHeight / 2) + Layout.REGULAR_TEXT_BASELINE_OFFSET, Colors.FOREGROUND);
+                this.drawString(graphics, label, sliderX - labelWidth - Layout.OPTION_TEXT_SIDE_PADDING, sliderY + (sliderHeight / 2) + Layout.REGULAR_TEXT_BASELINE_OFFSET, Colors.FOREGROUND);
             } else {
                 this.drawString(graphics, label, sliderX + sliderWidth - labelWidth, sliderY + (sliderHeight / 2) + Layout.REGULAR_TEXT_BASELINE_OFFSET, Colors.FOREGROUND);
             }
@@ -111,23 +111,15 @@ public class SliderControl implements Control {
         }
 
         public int getSliderX() {
-            return this.getLimitX() - 96;
+            return this.getLimitX() - Layout.SLIDER_WIDTH - Layout.OPTION_TEXT_SIDE_PADDING;
         }
 
         public int getSliderY() {
-            return this.getCenterY() - 5;
-        }
-
-        public int getSliderWidth() {
-            return 90;
-        }
-
-        public int getSliderHeight() {
-            return 10;
+            return this.getCenterY() - Layout.SLIDER_HEIGHT / 2;
         }
 
         public boolean isMouseOverSlider(double mouseX, double mouseY) {
-            return mouseX >= this.getSliderX() && mouseX < this.getSliderX() + this.getSliderWidth() && mouseY >= this.getSliderY() && mouseY < this.getSliderY() + this.getSliderHeight();
+            return mouseX >= this.getSliderX() && mouseX < this.getSliderX() + Layout.SLIDER_WIDTH && mouseY >= this.getSliderY() && mouseY < this.getSliderY() + Layout.SLIDER_HEIGHT;
         }
 
         @Override
@@ -154,7 +146,10 @@ public class SliderControl implements Control {
         public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
             this.sliderHeld = false;
 
-            if (this.option.isEnabled() && event.button() == 0 && this.isMouseOver(event.x(), event.y())) {
+            if (super.mouseClicked(event, doubleClick)) return true;
+            if (this.isResetOverlayActive()) return false;
+
+            if (this.option.isEnabled() && event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.isMouseOver(event.x(), event.y())) {
                 if (this.isMouseOverSlider(event.x(), event.y())) {
                     this.setValueFromMouse(event.x());
                     this.sliderHeld = true;
@@ -168,9 +163,9 @@ public class SliderControl implements Control {
 
         @Override
         public boolean mouseReleased(MouseButtonEvent event) {
-            if (this.option.isEnabled() && event.button() == 0 && this.sliderHeld) {
+            if (this.option.isEnabled() && event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.sliderHeld) {
                 this.sliderHeld = false;
-                playClickSound();
+                this.playClickSound();
                 return true;
             }
 
@@ -179,7 +174,7 @@ public class SliderControl implements Control {
 
         @Override
         public boolean mouseDragged(MouseButtonEvent event, double deltaX, double deltaY) {
-            if (this.option.isEnabled() && event.button() == 0) {
+            if (this.option.isEnabled() && event.button() == InputConstants.MOUSE_BUTTON_LEFT) {
                 if (this.sliderHeld) {
                     this.setValueFromMouse(event.x());
                 }
@@ -191,7 +186,7 @@ public class SliderControl implements Control {
         }
 
         private void setValueFromMouse(double d) {
-            this.setValue(Mth.clamp((d - (double) this.getSliderX()) / (double) this.getSliderWidth(), 0.0D, 1.0D));
+            this.setValue(Mth.clamp((d - (double) this.getSliderX()) / (double) Layout.SLIDER_WIDTH, 0.0D, 1.0D));
         }
 
         public void setValue(double newThumbPosition) {
@@ -202,7 +197,7 @@ public class SliderControl implements Control {
 
         @Override
         public boolean keyPressed(KeyEvent event) {
-            if (!isFocused()) return false;
+            if (!this.isFocused()) return false;
 
             var range = this.option.getSteppedValidator();
             var isLeft = event.isLeft();

@@ -2,7 +2,7 @@ package net.caffeinemc.mods.sodium.mixin.core.render.immediate.consumer;
 
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.renderpearl.api.vertex.VertexFormat;
 import net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics;
 import net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter;
 import net.caffeinemc.mods.sodium.api.vertex.serializer.VertexSerializerRegistry;
@@ -49,7 +49,7 @@ public abstract class BufferBuilderMixin implements VertexBufferWriter, BufferBu
     }
 
     @Override
-    public void push(MemoryStack stack, long src, int count, VertexFormat format) {
+    public void sodium$push(MemoryStack stack, long src, int count, VertexFormat format) {
         var length = count * this.vertexSize;
 
         // The buffer may change in the even, so we need to make sure that the
@@ -66,7 +66,7 @@ public abstract class BufferBuilderMixin implements VertexBufferWriter, BufferBu
         }
 
         this.vertices += count;
-        this.vertexPointer = (dst + length) - vertexSize;
+        this.vertexPointer = (dst + length) - this.vertexSize;
         this.elementsToFill = 0;
     }
 

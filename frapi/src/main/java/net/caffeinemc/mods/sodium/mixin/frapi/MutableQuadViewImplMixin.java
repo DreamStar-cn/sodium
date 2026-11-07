@@ -1,11 +1,8 @@
 package net.caffeinemc.mods.sodium.mixin.frapi;
 
 import net.caffeinemc.mods.sodium.client.render.frapi.wrapper.ExtendedMutableQuadViewImpl;
-import net.caffeinemc.mods.sodium.client.render.frapi.wrapper.ExtendedQuadViewImpl;
 import net.caffeinemc.mods.sodium.client.render.frapi.wrapper.MutableQuadViewWrapper;
-import net.caffeinemc.mods.sodium.client.render.frapi.wrapper.QuadViewWrapper;
 import net.caffeinemc.mods.sodium.client.render.model.MutableQuadViewImpl;
-import net.caffeinemc.mods.sodium.client.render.model.QuadViewImpl;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
@@ -15,8 +12,8 @@ public class MutableQuadViewImplMixin implements ExtendedMutableQuadViewImpl {
     private MutableQuadViewWrapper wrapper;
 
     @Override
-    public MutableQuadViewWrapper getWrapper() {
-        if (wrapper == null) wrapper = new MutableQuadViewWrapper((MutableQuadViewImpl) (Object) this);
-        return wrapper;
+    public MutableQuadViewWrapper sodium$getWrapper() {
+        if (this.wrapper == null) this.wrapper = new MutableQuadViewWrapper((MutableQuadViewImpl) (Object) this);
+        return this.wrapper;
     }
 }

@@ -1,5 +1,6 @@
 package net.caffeinemc.mods.sodium.client.gui.widgets;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.caffeinemc.mods.sodium.client.gui.ButtonTheme;
 import net.caffeinemc.mods.sodium.client.gui.Colors;
 import net.caffeinemc.mods.sodium.client.gui.Layout;
@@ -67,8 +68,9 @@ public class FlatButtonWidget extends AbstractWidget implements Renderable {
         }
 
         if (this.label != null) {
-            int strWidth = this.font.width(this.label);
-            this.drawString(graphics, this.label, this.leftAlign ? this.getX() + Layout.TEXT_LEFT_PADDING : (this.getCenterX() - (strWidth / 2)), this.getCenterY() - this.font.lineHeight / 2, textColor);
+            Component rendered = this.getRenderedLabel();
+            int strWidth = this.font.width(rendered);
+            this.drawString(graphics, rendered, this.leftAlign ? this.getX() + Layout.TEXT_LEFT_PADDING : (this.getCenterX() - (strWidth / 2)), this.getCenterY() - this.font.lineHeight / 2, textColor);
         }
 
         if (this.enabled && this.selected) {
@@ -84,6 +86,10 @@ public class FlatButtonWidget extends AbstractWidget implements Renderable {
         return this.enabled ? this.theme.themeLighter : this.theme.themeDarker;
     }
 
+    protected Component getRenderedLabel() {
+        return this.label;
+    }
+
     public void setSelected(boolean selected) {
         this.selected = selected;
     }
@@ -94,8 +100,8 @@ public class FlatButtonWidget extends AbstractWidget implements Renderable {
             return false;
         }
 
-        if (event.button() == 0 && this.isMouseOver(event.x(), event.y())) {
-            doAction();
+        if (event.button() == InputConstants.MOUSE_BUTTON_LEFT && this.isMouseOver(event.x(), event.y())) {
+            this.doAction();
 
             return true;
         }
@@ -109,14 +115,14 @@ public class FlatButtonWidget extends AbstractWidget implements Renderable {
             return false;
 
         if (event.isSelection()) {
-            doAction();
+            this.doAction();
             return true;
         }
 
         return false;
     }
 
-    private void doAction() {
+    protected void doAction() {
         this.action.run();
         this.playClickSound();
     }
@@ -138,5 +144,9 @@ public class FlatButtonWidget extends AbstractWidget implements Renderable {
 
     public boolean isVisible() {
         return this.visible;
+    }
+
+    public boolean isEnabled() {
+        return this.enabled;
     }
 }

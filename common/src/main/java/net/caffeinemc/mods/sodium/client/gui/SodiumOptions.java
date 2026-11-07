@@ -3,11 +3,11 @@ package net.caffeinemc.mods.sodium.client.gui;
 import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import com.mojang.renderpearl.api.textures.FilterMode;
 import net.caffeinemc.mods.sodium.client.render.chunk.DeferMode;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.QuadSplittingMode;
 import net.caffeinemc.mods.sodium.client.services.PlatformRuntimeInformation;
 import net.caffeinemc.mods.sodium.client.util.FileUtil;
-import org.jspecify.annotations.NonNull;
 
 import java.io.FileReader;
 import java.io.IOException;
@@ -22,7 +22,7 @@ public class SodiumOptions {
     public final PerformanceSettings performance = new PerformanceSettings();
     public final AdvancedSettings advanced = new AdvancedSettings();
 
-    public @NonNull DebugSettings debug = new DebugSettings();
+    public final DebugSettings debug = new DebugSettings();
     public final NotificationSettings notifications = new NotificationSettings();
 
     private boolean readOnly;
@@ -38,6 +38,8 @@ public class SodiumOptions {
     public static class QualitySettings {
         public boolean hiddenFluidCulling = true;
         public boolean improvedFluidShaping = false;
+        public boolean useClosestPointEntitySort = false;
+        public FilterMode pixelFilteringMode = FilterMode.NEAREST;
     }
 
     public static class PerformanceSettings {
@@ -55,9 +57,6 @@ public class SodiumOptions {
 
     public static class AdvancedSettings {
         public boolean enableMemoryTracing = false;
-        public boolean useAdvancedStagingBuffers = true;
-
-        public int cpuRenderAheadLimit = 3;
     }
 
     public static class DebugSettings {
@@ -106,7 +105,8 @@ public class SodiumOptions {
 
     public static void writeToDisk(SodiumOptions config) throws IOException {
         if (config.isReadOnly()) {
-            throw new IllegalStateException("Config file is read-only");
+            // throws an IOException so that it is caught correctly when trying to save the config when it's locked
+            throw new IOException("Config file is read-only");
         }
 
         Path path = getConfigPath();

@@ -6,11 +6,11 @@ import com.mojang.blaze3d.vertex.QuadInstance;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.caffeinemc.mods.sodium.api.memory.MemoryIntrinsics;
 import net.caffeinemc.mods.sodium.api.texture.SpriteUtil;
-import net.caffeinemc.mods.sodium.api.util.ColorABGR;
 import net.caffeinemc.mods.sodium.api.vertex.buffer.VertexBufferWriter;
-import net.caffeinemc.mods.sodium.client.model.quad.ModelQuadView;
+import net.caffeinemc.mods.sodium.client.model.quad.BakedQuadView;
 import net.caffeinemc.mods.sodium.client.render.immediate.model.BakedModelEncoder;
 import net.minecraft.client.resources.model.geometry.BakedQuad;
+import org.jspecify.annotations.NonNull;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -22,11 +22,11 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class BufferBuilderMixin implements VertexConsumer {
     @Shadow
     @Final
-    private boolean fastFormat;
+    private boolean blockFormat;
 
     @Shadow
     @Final
-    private boolean fullFormat;
+    private boolean entityFormat;
 
     @Redirect(method = "*", at = @At(value = "INVOKE", target = "Lorg/lwjgl/system/MemoryUtil;memPutInt(JI)V"))
     private static void redirectInt(long address, int value) {
@@ -49,8 +49,8 @@ public abstract class BufferBuilderMixin implements VertexConsumer {
     }
 
     @Override
-    public void putBakedQuad(PoseStack.Pose pose, BakedQuad quad, QuadInstance instance) {
-        if (!this.fastFormat) { // check for ENTITY.
+    public void putBakedQuad(PoseStack.@NonNull Pose pose, @NonNull BakedQuad quad, @NonNull QuadInstance instance) {
+        if (!this.blockFormat && !this.entityFormat) {
             VertexConsumer.super.putBakedQuad(pose, quad, instance);
 
             if (quad.materialInfo().sprite() != null) {
@@ -60,9 +60,9 @@ public abstract class BufferBuilderMixin implements VertexConsumer {
             return;
         }
 
-        VertexBufferWriter writer = VertexBufferWriter.of(this);
+        VertexBufferWriter writer = VertexBufferWriter.sodium$of(this);
 
-        ModelQuadView quadX = (ModelQuadView) (Object) quad;
+        BakedQuadView quadX = (BakedQuadView) (Object) quad;
 
         BakedModelEncoder.writeQuadVertices(writer, pose, quadX, instance);
 

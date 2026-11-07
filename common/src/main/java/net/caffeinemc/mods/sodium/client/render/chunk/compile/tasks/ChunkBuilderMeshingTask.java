@@ -12,6 +12,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline.BlockRend
 import net.caffeinemc.mods.sodium.client.render.chunk.compile.pipeline.BlockRenderer;
 import net.caffeinemc.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
 import net.caffeinemc.mods.sodium.client.render.chunk.data.BuiltSectionMeshParts;
+import net.caffeinemc.mods.sodium.client.render.chunk.occlusion.DirectionalVisGraph;
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.DefaultTerrainRenderPasses;
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.TerrainRenderPass;
 import net.caffeinemc.mods.sodium.client.render.chunk.terrain.material.DefaultMaterials;
@@ -19,6 +20,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.SortBe
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.SortType;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.TranslucentGeometryCollector;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.DynamicData;
+import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.DynamicSorter;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.PresentTranslucentData;
 import net.caffeinemc.mods.sodium.client.render.chunk.translucent_sorting.data.TranslucentData;
 import net.caffeinemc.mods.sodium.client.services.PlatformLevelRenderHooks;
@@ -32,7 +34,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
-import net.minecraft.client.renderer.chunk.VisGraph;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.profiling.Profiler;
 import net.minecraft.util.profiling.ProfilerFiller;
@@ -55,31 +56,35 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
     private final ChunkRenderContext renderContext;
     private final SortBehavior sortBehavior;
     private final boolean forceSort;
+    private final boolean blockingTask;
+    private final long chunkCaptureTime;
 
-    public ChunkBuilderMeshingTask(RenderSection render, int buildTime, Vector3dc absoluteCameraPos, ChunkRenderContext renderContext, SortBehavior sortBehavior, boolean forceSort) {
+    public ChunkBuilderMeshingTask(RenderSection render, int buildTime, Vector3dc absoluteCameraPos, ChunkRenderContext renderContext, SortBehavior sortBehavior, boolean forceSort, boolean blockingTask, long chunkCaptureTime) {
         super(render, buildTime, absoluteCameraPos);
         this.renderContext = renderContext;
         this.sortBehavior = sortBehavior;
         this.forceSort = forceSort;
+        this.blockingTask = blockingTask;
+        this.chunkCaptureTime = chunkCaptureTime;
     }
 
     @Override
     public ChunkBuildOutput execute(ChunkBuildContext buildContext, CancellationToken cancellationToken) {
         ProfilerFiller profiler = Profiler.get();
         BuiltSectionInfo.Builder renderData = new BuiltSectionInfo.Builder();
-        VisGraph occluder = new VisGraph();
+        DirectionalVisGraph occluder = new DirectionalVisGraph();
 
         ChunkBuildBuffers buffers = buildContext.buffers;
-        buffers.init(renderData, this.render.getSectionIndex());
+        buffers.init(renderData, this.section.getSectionIndex());
 
         BlockRenderCache cache = buildContext.cache;
         cache.init(this.renderContext);
 
         LevelSlice slice = cache.getWorldSlice();
 
-        int minX = this.render.getOriginX();
-        int minY = this.render.getOriginY();
-        int minZ = this.render.getOriginZ();
+        int minX = this.section.getOriginX();
+        int minY = this.section.getOriginY();
+        int minZ = this.section.getOriginZ();
 
         int maxX = minX + 16;
         int maxY = minY + 16;
@@ -92,7 +97,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         boolean sortEnabled = this.sortBehavior != SortBehavior.OFF;
         TranslucentGeometryCollector collector;
         if (sortEnabled) {
-            collector = new TranslucentGeometryCollector(this.render.getPosition(), this.sortBehavior);
+            collector = new TranslucentGeometryCollector(this.section.getPosition(), this.sortBehavior);
         } else {
             collector = null;
         }
@@ -115,7 +120,10 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                         }
 
                         blockPos.set(x, y, z);
-                        modelOffset.set(x & 15, y & 15, z & 15);
+                        int localX = x & 15;
+                        int localY = y & 15;
+                        int localZ = z & 15;
+                        modelOffset.set(localX, localY, localZ);
 
                         if (blockState.getRenderShape() == RenderShape.MODEL) {
                             BlockStateModel model = cache.getBlockModels()
@@ -142,17 +150,17 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                         }
 
                         if (blockState.isSolidRender()) {
-                            occluder.setOpaque(blockPos);
+                            occluder.setOpaque(localX, localY, localZ);
                         }
                     }
                 }
             }
         } catch (ReportedException ex) {
             // Propagate existing crashes (add context)
-            throw fillCrashInfo(ex.getReport(), slice, blockPos);
+            throw this.fillCrashInfo(ex.getReport(), slice, blockPos);
         } catch (Exception ex) {
             // Create a new crash report for other exceptions (e.g. thrown in getQuads)
-            throw fillCrashInfo(CrashReport.forThrowable(ex, "Encountered exception while building chunk meshes"), slice, blockPos);
+            throw this.fillCrashInfo(CrashReport.forThrowable(ex, "Encountered exception while building chunk meshes"), slice, blockPos);
         }
         profiler.popPush("mesh appenders");
 
@@ -174,14 +182,24 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         profiler.popPush("translucency sorting");
 
         boolean reuseUploadedData = false;
+        boolean reuseTSData = false;
         TranslucentData translucentData = null;
+        DynamicSorter reusedSorter = null;
         if (sortEnabled) {
-            TranslucentData oldData = this.render.getTranslucentData();
+            TranslucentData oldData = this.section.getTranslucentData();
 
-            // Reusing non-dynamic data leads to attempting to sort with it again,
-            // which throws an exception since it can only generate a sorter once.
-            // To prevent this, reusing data is prevented when forceSort is enabled and the data is not dynamic.
-            if (this.forceSort && !(oldData instanceof DynamicData)) {
+            if (oldData instanceof DynamicData dynamicData) {
+                // if the geometry planes have already been cleared from the dynamic sorter,
+                // we cannot reuse this TS data as it cannot be re-integrated into the triggering system
+                reusedSorter = dynamicData.getSorter(false);
+                if (reusedSorter.getGeometryPlanes() == null) {
+                    reusedSorter = null;
+                    oldData = null;
+                }
+            } else if (this.forceSort) {
+                // Reusing non-dynamic data leads to attempting to sort with it again,
+                // which throws an exception since it can only generate a sorter once.
+                // To prevent this, reusing data is prevented when forceSort is enabled and the data is not dynamic.
                 oldData = null;
             }
 
@@ -189,9 +207,10 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                 translucentData = collector.getTranslucentData(oldData, this);
             } catch (Exception ex) {
                 // Create a new crash report for exceptions thrown during sort preparation
-                throw fillCrashInfo(CrashReport.forThrowable(ex, "Encountered exception while preparing for translucency sorting"), slice, null);
+                throw this.fillCrashInfo(CrashReport.forThrowable(ex, "Encountered exception while preparing for translucency sorting"), slice, null);
             }
-            reuseUploadedData = !this.forceSort && translucentData == oldData;
+            reuseTSData = translucentData == oldData;
+            reuseUploadedData = !this.forceSort && reuseTSData;
         }
 
         profiler.popPush("meshing");
@@ -199,7 +218,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         Map<TerrainRenderPass, BuiltSectionMeshParts> meshes = new Reference2ReferenceOpenHashMap<>();
         var visibleSlices = DefaultChunkRenderer.getVisibleFaces(
                 (int) this.absoluteCameraPos.x(), (int) this.absoluteCameraPos.y(), (int) this.absoluteCameraPos.z(),
-                this.render.getChunkX(), this.render.getChunkY(), this.render.getChunkZ());
+                this.section.getChunkX(), this.section.getChunkY(), this.section.getChunkZ());
 
         if (translucentData != null && translucentData.meshesWereModified()) {
             meshes.put(DefaultTerrainRenderPasses.TRANSLUCENT, buffers.createModifiedTranslucentMesh(translucentData.getUpdatedQuads()));
@@ -225,19 +244,28 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         }
 
         renderData.setOcclusionData(occluder.resolve());
-        var output = new ChunkBuildOutput(this.render, this.submitTime, translucentData, renderData.build(), meshes);
+        var output = new ChunkBuildOutput(this.section, this.submitTime, translucentData, renderData.build(), meshes, this.blockingTask, this.chunkCaptureTime);
 
         if (sortEnabled) {
+            // we need to set the reused sorter on reused dynamic data regardless of whether the uploaded index data is being reused
+            if (reuseTSData) {
+                // set a sorter so that it retains a copy of the geometry planes for potential re-integration into the triggering system
+                // assumption: reusedSorter is only set when we're using dynamic data
+                output.setSorter(reusedSorter);
+            }
+
             if (reuseUploadedData) {
-                output.markAsReusingUploadedData();
+                // TODO: problem: when reusing index data, we may be doing so based on uploaded indexes that are not corresponding to the translucent data that ends up getting set on the section.
+                output.setContainsNewIndexData(false);
             } else if (translucentData instanceof PresentTranslucentData present) {
                 try {
-                    var sorter = present.getSorter();
-                    sorter.writeIndexBuffer(this, true);
+                    var sorter = present.getSorter(true);
+                    sorter.writeIndexBuffer(this);
                     output.setSorter(sorter);
+                    output.setContainsNewIndexData(true);
                 } catch (Exception ex) {
                     // Create a new crash report for exceptions thrown during sorting
-                    throw fillCrashInfo(CrashReport.forThrowable(ex, "Encountered exception while writing index buffer for translucent geometry"), slice, null);
+                    throw this.fillCrashInfo(CrashReport.forThrowable(ex, "Encountered exception while writing index buffer for translucent geometry"), slice, null);
                 }
             }
         }
@@ -259,7 +287,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
             CrashReportCategory.populateBlockDetails(crashReportSection, slice, pos, state);
         }
 
-        crashReportSection.setDetail("Chunk section", this.render);
+        crashReportSection.setDetail("Chunk section", this.section);
         if (this.renderContext != null) {
             crashReportSection.setDetail("Render context volume", this.renderContext.getVolume());
         }
@@ -269,6 +297,6 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
     @Override
     public long estimateTaskSizeWith(MeshTaskSizeEstimator estimator) {
-        return estimator.estimateSize(this.render);
+        return estimator.estimateSize(this.section);
     }
 }

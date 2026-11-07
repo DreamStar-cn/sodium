@@ -1,17 +1,17 @@
 package net.caffeinemc.mods.sodium.mixin.features.render.gui.font;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import net.caffeinemc.mods.sodium.api.util.ColorARGB;
-import net.caffeinemc.mods.sodium.client.render.vertex.VertexConsumerUtils;
-import net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex;
-import net.minecraft.client.gui.font.glyphs.BakedGlyph;
-import net.caffeinemc.mods.sodium.api.util.ColorABGR;
 import net.caffeinemc.mods.sodium.api.math.MatrixHelper;
+import net.caffeinemc.mods.sodium.api.util.ColorARGB;
+import net.caffeinemc.mods.sodium.api.vertex.format.common.GlyphVertex;
+import net.caffeinemc.mods.sodium.client.render.vertex.VertexConsumerUtils;
 import net.minecraft.client.gui.font.glyphs.BakedSheetGlyph;
-import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 import org.lwjgl.system.MemoryStack;
-import org.spongepowered.asm.mixin.*;
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
@@ -55,8 +55,17 @@ public class BakedGlyphMixin {
      * @author JellySquid
      */
     @Inject(method = "render", at = @At("HEAD"), cancellable = true)
-    private void drawFast(boolean italic, float x, float y, float z, Matrix4fc matrix, VertexConsumer vertexConsumer, int c, boolean bl2, int light, CallbackInfo ci) {
-        var writer = VertexConsumerUtils.convertOrLog(vertexConsumer);
+    private void drawFast(boolean italic,
+                          float x,
+                          float y,
+                          float z,
+                          Matrix4fc pose,
+                          VertexConsumer builder,
+                          int color,
+                          boolean bold,
+                          int packedLightCoords,
+                          CallbackInfo ci) {
+        var writer = VertexConsumerUtils.convertOrLog(builder);
 
         if (writer == null) {
             return;
@@ -70,27 +79,27 @@ public class BakedGlyphMixin {
         float h2 = y + this.down;
         float w1 = italic ? 1.0F - 0.25F * this.up : 0.0F;
         float w2 = italic ? 1.0F - 0.25F * this.down : 0.0F;
-        float offset = bl2 ? 0.1F : 0.0F;
+        float offset = bold ? 0.1F : 0.0F;
 
-        int color = ColorARGB.toABGR(c);
+        color = ColorARGB.toABGR(color);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             long buffer = stack.nmalloc(4 * GlyphVertex.STRIDE);
             long ptr = buffer;
 
-            write(ptr, matrix, x1 + w1 - offset, h1 - offset, z, color, this.u0, this.v0, light);
+            write(ptr, pose, x1 + w1 - offset, h1 - offset, z, color, this.u0, this.v0, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            write(ptr, matrix, x1 + w2 - offset, h2 + offset, z, color, this.u0, this.v1, light);
+            write(ptr, pose, x1 + w2 - offset, h2 + offset, z, color, this.u0, this.v1, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            write(ptr, matrix, x2 + w2 + offset, h2 + offset, z, color, this.u1, this.v1, light);
+            write(ptr, pose, x2 + w2 + offset, h2 + offset, z, color, this.u1, this.v1, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            write(ptr, matrix, x2 + w1 + offset, h1 - offset, z, color, this.u1, this.v0, light);
+            write(ptr, pose, x2 + w1 + offset, h1 - offset, z, color, this.u1, this.v0, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            writer.push(stack, buffer, 4, GlyphVertex.FORMAT);
+            writer.sodium$push(stack, buffer, 4, GlyphVertex.FORMAT);
         }
     }
 
@@ -99,8 +108,15 @@ public class BakedGlyphMixin {
      * @author JellySquid
      */
     @Inject(method = "buildEffect", at = @At("HEAD"), cancellable = true)
-    private void drawEffectFast(BakedSheetGlyph.EffectInstance effect, float offset, float depthOffset, int c, VertexConsumer vertexConsumer, int light, Matrix4fc matrix, CallbackInfo ci) {
-        var writer = VertexConsumerUtils.convertOrLog(vertexConsumer);
+    private void drawEffectFast(BakedSheetGlyph.EffectInstance effect,
+                                float offset,
+                                float z,
+                                int color,
+                                VertexConsumer buffer,
+                                int packedLightCoords,
+                                Matrix4fc pose,
+                                CallbackInfo ci) {
+        var writer = VertexConsumerUtils.convertOrLog(buffer);
 
         if (writer == null) {
             return;
@@ -112,27 +128,26 @@ public class BakedGlyphMixin {
         float x2 = effect.x1();
         float h1 = effect.y1(); // Yes, this is swapped in 1.21.6+.
         float h2 = effect.y0();
-        float z = depthOffset;
 
-        int color = ColorARGB.toABGR(c);
+        color = ColorARGB.toABGR(color);
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
-            long buffer = stack.nmalloc(4 * GlyphVertex.STRIDE);
-            long ptr = buffer;
+            long mem = stack.nmalloc(4 * GlyphVertex.STRIDE);
+            long ptr = mem;
 
-            write(ptr, matrix, x1 + offset, h1 + offset, z, color, this.u0, this.v0, light);
+            write(ptr, pose, x1 + offset, h1 + offset, z, color, this.u0, this.v0, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            write(ptr, matrix, x2 + offset, h1 + offset, z, color, this.u0, this.v1, light);
+            write(ptr, pose, x2 + offset, h1 + offset, z, color, this.u0, this.v1, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            write(ptr, matrix, x2 + offset, h2 + offset, z, color, this.u1, this.v1, light);
+            write(ptr, pose, x2 + offset, h2 + offset, z, color, this.u1, this.v1, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            write(ptr, matrix, x1 + offset, h2 + offset, z, color, this.u1, this.v0, light);
+            write(ptr, pose, x1 + offset, h2 + offset, z, color, this.u1, this.v0, packedLightCoords);
             ptr += GlyphVertex.STRIDE;
 
-            writer.push(stack, buffer, 4, GlyphVertex.FORMAT);
+            writer.sodium$push(stack, mem, 4, GlyphVertex.FORMAT);
         }
     }
 

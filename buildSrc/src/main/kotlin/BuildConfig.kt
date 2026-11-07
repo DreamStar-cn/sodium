@@ -1,17 +1,24 @@
- import org.gradle.api.Project
+import org.gradle.api.Project
 
 object BuildConfig {
-    val MINECRAFT_VERSION: String = "26.1"
-    val NEOFORGE_VERSION: String = "26.1.0.3-beta"
-    val FABRIC_LOADER_VERSION: String = "0.18.4"
-    val FABRIC_API_VERSION: String = "0.144.0+26.1"
-    val SUPPORT_FRAPI : Boolean = false
-
-    // This value can be set to null to disable Parchment.
-    val PARCHMENT_VERSION: String? = null
+    val MINECRAFT_VERSION: String = "26.3"
+    val NEOFORGE_VERSION: String = "26.3.0.65-beta"
+    val FABRIC_LOADER_VERSION: String = "0.19.3"
+    val FABRIC_API_VERSION: String = "0.160.5+26.3"
+    val SUPPORT_FRAPI : Boolean = true
 
     // https://semver.org/
-    var MOD_VERSION: String = "0.8.9-beta.3"
+    val MOD_VERSION: String = "0.9.3-beta.3"
+
+    val MINECRAFT_VERSION_SHORT: String = MINECRAFT_VERSION
+            .replace("-snapshot-", "s")
+            .replace("-pre-", "p")
+            .replace("-rc-", "r")
+
+    val RELEASE_TAG: String = "mc$MINECRAFT_VERSION_SHORT-$MOD_VERSION"
+
+    val CURSEFORGE_PROJECT_ID = "394468"
+    val MODRINTH_PROJECT_ID = "AANobbMI"
 
     fun createVersionString(project: Project): String {
         val builder = StringBuilder()
@@ -26,7 +33,7 @@ object BuildConfig {
             builder.append("-SNAPSHOT")
         }
 
-        builder.append("+mc").append(MINECRAFT_VERSION)
+        builder.append("+mc").append(MINECRAFT_VERSION_SHORT)
 
         if (!isReleaseBuild) {
             if (buildId != null) {
@@ -38,4 +45,21 @@ object BuildConfig {
 
         return builder.toString()
     }
+
+    fun calculateGitHash(project: Project): String = try {
+        val output = project.providers.exec {
+            workingDir(project.projectDir)
+            commandLine("git", "rev-parse", "HEAD")
+        }
+        output.standardOutput.asText.get().trim()
+    } catch (_: Throwable) {
+        "unknown"
+    }
+
+    fun getChangelog(project: Project): String = project.rootProject.file("CHANGELOG.md").readText()
+            .split("----------")[1]
+            .trim()
+            .replace("[ReleaseTag]()", RELEASE_TAG)
+            .replace("[MCVersion]()", MINECRAFT_VERSION)
+            .replace("[SodiumVersion]()", MOD_VERSION)
 }

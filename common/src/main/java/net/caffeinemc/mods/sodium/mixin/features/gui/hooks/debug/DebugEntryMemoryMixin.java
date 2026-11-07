@@ -13,11 +13,9 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.lang.management.ManagementFactory;
-import java.util.Locale;
 
 @Mixin(DebugEntryMemory.class)
 public class DebugEntryMemoryMixin {
@@ -36,7 +34,11 @@ public class DebugEntryMemoryMixin {
     }
 
     @Inject(method = "display", at = @At(value = "RETURN"))
-    private void sodium$addOffHeap(DebugScreenDisplayer debugScreenDisplayer, Level level, LevelChunk levelChunk, LevelChunk levelChunk2, CallbackInfo ci) {
-        debugScreenDisplayer.addToGroup(GROUP, getNativeMemoryString());
+    private void sodium$addOffHeap(DebugScreenDisplayer displayer,
+                                   Level serverOrClientLevel,
+                                   LevelChunk clientChunk,
+                                   LevelChunk serverChunk,
+                                   CallbackInfo ci) {
+        displayer.addToGroup(GROUP, getNativeMemoryString());
     }
 }
